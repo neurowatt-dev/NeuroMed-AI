@@ -256,8 +256,6 @@ func run(ctx context.Context, b *Bot, in go_bot_discord.Input) error {
 		return fmt.Sprintf("`%s`: %s", toolName, text)
 	})
 	replyText := result.ReplyText
-	execErrors := result.ExecErrors
-	doneEvent := result.Done
 
 	if err := b.client.FinishStatus(ctx, in.ChannelID); err != nil {
 		slog.Warn("github.com/pardnchiu/go-bot/discord Bot.client.FinishStatus",
@@ -278,14 +276,6 @@ func run(ctx context.Context, b *Bot, in go_bot_discord.Input) error {
 	replyText = voiceResult.CleanText
 	voiceTexts := voiceResult.Texts
 	autoVoiceReply := voiceResult.AutoReply
-
-	model := doneEvent.Model
-	if model == "" && agent != nil {
-		model = agent.Name()
-	}
-	footer := utils.FormatEventFooter(doneEvent.Duration, model, doneEvent.Usage)
-	hasMedia := len(attachmentPaths) > 0 || len(voiceTexts) > 0
-	replyText = chatbot.AppendReplyFooter(chatbot.Discord, replyText, footer, hasMedia, execErrors)
 
 	chunks := chatbot.Chunk(chatbot.Discord, replyText)
 	replyTo := in.MessageID

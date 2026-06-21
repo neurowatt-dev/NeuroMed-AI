@@ -1,17 +1,17 @@
 #!/usr/bin/env bash
 #
-# Agenvoy updater - always overwrite to the latest release.
+# NeuroMed-AI updater - always overwrite to the latest linebot branch.
 # Source clone is staged under /tmp and removed on exit / interrupt.
 #
 # Usage:
-#   curl -fsSL https://agenvoy.com/static/scripts/update.sh -o /tmp/agenvoy-update.sh \
-#     && bash /tmp/agenvoy-update.sh; rm -f /tmp/agenvoy-update.sh
+#   curl -fsSL https://raw.githubusercontent.com/neurowatt-dev/NeuroMed-AI/linebot/static/scripts/update.sh \
+#     -o /tmp/neuromed-update.sh && bash /tmp/neuromed-update.sh; rm -f /tmp/neuromed-update.sh
 #   agen update
 #
 set -euo pipefail
 
-REPO_URL="https://github.com/agenvoy/agenvoy.git"
-REPO_API="https://api.github.com/repos/agenvoy/agenvoy/releases/latest"
+REPO_URL="https://github.com/neurowatt-dev/NeuroMed-AI.git"
+BRANCH="linebot"
 GO_INSTALL_DIR="${HOME}/.local/go"
 REQUIRED_GO_MAJOR=1
 REQUIRED_GO_MINOR=26
@@ -31,7 +31,7 @@ die()  { printf "%s xx%s %s\n" "$C_RED" "$C_RST" "$*" >&2; exit 1; }
 print_done() {
   local tag="$1"
   local lines=(
-    "Agenvoy ${tag} installed"
+    "NeuroMed-AI ${tag} installed"
     ""
     "Next: run 'agen' to attach the new build"
   )
@@ -189,42 +189,33 @@ cleanup() {
 }
 trap cleanup EXIT INT TERM
 
-latest_tag() {
-  curl -fsSL "$REPO_API" \
-    | grep -o '"tag_name"[[:space:]]*:[[:space:]]*"[^"]*"' \
-    | head -n 1 \
-    | sed 's/.*"\([^"]*\)"$/\1/'
-}
-
 main() {
-  log "Agenvoy updater"
+  log "NeuroMed-AI updater (linebot branch)"
 
   require_cmd curl
   require_cmd git
   require_cmd make
   ensure_go
 
-  log "Resolving latest release tag..."
-  local tag
-  tag="$(latest_tag)"
-  [ -n "$tag" ] || die "Failed to resolve latest tag from $REPO_API"
-  log "Latest: $tag"
+  SRC_DIR="$(mktemp -d "${TMPDIR:-/tmp}/neuromed-update.XXXXXX")"
+  log "Cloning ${BRANCH} branch -> ${SRC_DIR}"
+  git clone --depth 1 --branch "$BRANCH" "$REPO_URL" "$SRC_DIR"
 
-  SRC_DIR="$(mktemp -d "${TMPDIR:-/tmp}/agenvoy-update.XXXXXX")"
-  log "Cloning agenvoy@${tag} -> ${SRC_DIR}"
-  git clone --depth 1 --branch "$tag" "$REPO_URL" "$SRC_DIR"
+  local rev
+  rev="$(cd "$SRC_DIR" && git rev-parse --short HEAD)"
+  log "HEAD: ${rev}"
 
   log "Building (sudo prompt expected for /usr/local/bin install)"
   ( cd "$SRC_DIR" && make build )
 
   command -v agen >/dev/null 2>&1 \
     || die "agen not found on PATH after build (expected /usr/local/bin/agen)"
-  ok "Updated to $tag at $(command -v agen)"
+  ok "Updated to ${BRANCH}@${rev} at $(command -v agen)"
 
   log "Stopping old daemon (if any) so the new binary takes effect"
   agen stop || true
 
-  print_done "$tag"
+  print_done "${BRANCH}@${rev}"
 }
 
 main "$@"

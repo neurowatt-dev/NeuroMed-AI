@@ -202,17 +202,6 @@ func run(ctx context.Context, b *Bot, in go_bot_line.Input, attachInputs []go_bo
 		return fmt.Errorf("no reply")
 	}
 
-	model := result.Done.Model
-	if model == "" && primary != nil {
-		model = primary.Name()
-	}
-	if footer := utils.FormatEventFooter(result.Done.Duration, model, result.Done.Usage); footer != "" {
-		replyText = replyText + "\n\n" + footer
-	}
-	if len(result.ExecErrors) > 0 {
-		replyText = replyText + "\n⚠️ " + strings.Join(result.ExecErrors, ", ")
-	}
-
 	for _, part := range chunk(replyText) {
 		if _, err := b.client.Send(ctx, target, part); err != nil {
 			slog.Warn("github.com/pardnchiu/go-bot/line Bot.Send",

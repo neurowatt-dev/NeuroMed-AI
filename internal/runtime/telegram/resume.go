@@ -111,14 +111,6 @@ func (b *Bot) resumeFromPending(sessionID, taskHash string, answers []any) {
 	cleanText, photoPaths, docPaths := extractFileMarkers(replyText)
 	replyText = cleanText
 
-	model := result.Done.Model
-	if model == "" && primary != nil {
-		model = primary.Name()
-	}
-	footer := utils.FormatEventFooter(result.Done.Duration, model, result.Done.Usage)
-	hasMedia := len(photoPaths) > 0 || len(docPaths) > 0
-	replyText = chatbot.AppendReplyFooter(chatbot.Telegram, replyText, footer, hasMedia, result.ExecErrors)
-
 	for _, c := range chatbot.Chunk(chatbot.Telegram, chatbot.SanitizeTelegramHTML(replyText)) {
 		if _, err := b.client.Send(ctx, chatID, 0, c, go_bot_telegram.WithSendType(go_bot_telegram.TypeHTML)); err != nil {
 			slog.Warn("Send (resume)", slog.String("session", sessionID), slog.String("error", err.Error()))

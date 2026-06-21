@@ -55,13 +55,6 @@ func PushLineResult(ctx context.Context, payload exec.PushPayload) {
 	if message == "" {
 		return
 	}
-	if footer := utils.FormatEventFooter(payload.Duration, payload.Model, payload.Usage); footer != "" {
-		message = message + "\n\n" + footer
-	}
-	if prefix := strings.TrimSpace(payload.Prefix); prefix != "" {
-		message = prefix + "\n\n" + message
-	}
-
 	for _, part := range chunk(message) {
 		if _, err := client.Send(ctx, target, part); err != nil {
 			slog.Warn("github.com/pardnchiu/go-bot/line Bot.Send",

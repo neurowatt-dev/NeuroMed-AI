@@ -304,8 +304,6 @@ func run(ctx context.Context, b *Bot, in go_bot_telegram.Input, attachInputs []g
 		return fmt.Sprintf("<code>%s</code>: <code>%s</code>", toolName, text)
 	})
 	replyText := result.ReplyText
-	execErrors := result.ExecErrors
-	doneEvent := result.Done
 
 	if err := b.client.FinishStatus(ctx, in.ChatID); err != nil {
 		slog.Warn("github.com/pardnchiu/go-bot/telegram Bot.client.FinishStatus",
@@ -327,14 +325,6 @@ func run(ctx context.Context, b *Bot, in go_bot_telegram.Input, attachInputs []g
 	replyText = voiceResult.CleanText
 	voiceTexts := voiceResult.Texts
 	autoVoiceReply := voiceResult.AutoReply
-
-	model := doneEvent.Model
-	if model == "" && agent != nil {
-		model = agent.Name()
-	}
-	footer := utils.FormatEventFooter(doneEvent.Duration, model, doneEvent.Usage)
-	hasMedia := len(photoPaths) > 0 || len(docPaths) > 0 || len(voiceTexts) > 0
-	replyText = chatbot.AppendReplyFooter(chatbot.Telegram, replyText, footer, hasMedia, execErrors)
 
 	if in.MessageID != 0 {
 		replyText = "​\n" + replyText

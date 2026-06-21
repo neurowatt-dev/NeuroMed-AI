@@ -113,14 +113,6 @@ func (b *Bot) resumeFromPending(sessionID, taskHash string, answers []any) {
 	cleanText, attachmentPaths := utils.ExtractFileMarkers(replyText)
 	replyText = cleanText
 
-	model := result.Done.Model
-	if model == "" && primary != nil {
-		model = primary.Name()
-	}
-	footer := utils.FormatEventFooter(result.Done.Duration, model, result.Done.Usage)
-	hasMedia := len(attachmentPaths) > 0
-	replyText = chatbot.AppendReplyFooter(chatbot.Discord, replyText, footer, hasMedia, result.ExecErrors)
-
 	for _, part := range chatbot.Chunk(chatbot.Discord, replyText) {
 		if _, err := b.client.Send(ctx, channelID, "", part); err != nil {
 			slog.Warn("Send (resume)", slog.String("session", sessionID), slog.String("error", err.Error()))

@@ -149,7 +149,7 @@ func Execute(ctx context.Context, data ExecData, session *agentTypes.AgentSessio
 		trace := make([]execStep, len(execTrace))
 		copy(trace, execTrace)
 		for _, s := range usedSkills {
-			postSkillImprove(s, trace)
+			go postSkillImprove(s, trace)
 		}
 	}()
 
@@ -300,6 +300,10 @@ func Execute(ctx context.Context, data ExecData, session *agentTypes.AgentSessio
 		data.ExcludeTools = append(data.ExcludeTools,
 			"format_chatbot", "list_chatbot", "send_to_chatbot")
 	}
+	if strings.HasPrefix(session.ID, "ln-") {
+		data.ExcludeTools = append(data.ExcludeTools,
+			"generate_image", "ask_user", "store_secret", "transcribe_media")
+	}
 
 	if len(data.ExcludeTools) > 0 {
 		excluded := make(map[string]bool, len(data.ExcludeTools))
@@ -437,6 +441,14 @@ func Execute(ctx context.Context, data ExecData, session *agentTypes.AgentSessio
 			}
 			isTimeout := isSendTimeoutError(err, sendCtxErr)
 			modelName := data.Agent.Name()
+
+			if rateLimit := isRateLimit(err); rateLimit != nil {
+				cooldownMap.Store(rateLimit.Agent, rateLimit.ResetsAt)
+				slog.Warn("data.Agent.Send rate limited, model cooldown registered",
+					slog.String("session", session.ID),
+					slog.String("name", rateLimit.Agent),
+					slog.Int64("resets_at", rateLimit.ResetsAt))
+			}
 
 			if isContextLengthError(err) {
 				sendFailCount++

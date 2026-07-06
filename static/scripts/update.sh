@@ -12,6 +12,7 @@ set -euo pipefail
 
 REPO_URL="https://github.com/neurowatt-dev/NeuroMed-AI.git"
 BRANCH="linebot"
+KURADB_INSTALL_URL="https://kuradb.agenvoy.com/scripts/install.sh"
 GO_INSTALL_DIR="${HOME}/.local/go"
 REQUIRED_GO_MAJOR=1
 REQUIRED_GO_MINOR=26
@@ -189,6 +190,12 @@ cleanup() {
 }
 trap cleanup EXIT INT TERM
 
+update_kuradb() {
+  command -v kura >/dev/null 2>&1 || return 0
+  log "kura detected, updating KuraDB"
+  curl -fsSL "$KURADB_INSTALL_URL" | bash || warn "kuradb update failed, continuing"
+}
+
 main() {
   log "NeuroMed-AI updater (linebot branch)"
 
@@ -214,6 +221,8 @@ main() {
 
   log "Stopping old daemon (if any) so the new binary takes effect"
   agen stop || true
+
+  update_kuradb
 
   print_done "${BRANCH}@${rev}"
 }

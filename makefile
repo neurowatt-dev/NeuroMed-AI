@@ -44,7 +44,7 @@ stop:
 	go run ./cmd/app/ stop
 
 update:
-	@go run ./cmd/app/ update
+	@bash static/scripts/update.sh
 
 test:
 	@go test -v -count=1 ./...

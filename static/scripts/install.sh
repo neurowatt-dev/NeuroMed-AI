@@ -1,20 +1,44 @@
 #!/usr/bin/env bash
 #
-# NeuroMed-AI updater - always overwrite to the latest linebot branch.
-# Source clone is staged under /tmp and removed on exit / interrupt.
-#
+# NeuroMed-AI installer - builds the latest linebot branch HEAD.
 # Usage:
-#   curl -fsSL https://raw.githubusercontent.com/neurowatt-dev/NeuroMed-AI/linebot/static/scripts/update.sh \
-#     -o /tmp/neuromed-update.sh && bash /tmp/neuromed-update.sh; rm -f /tmp/neuromed-update.sh
-#   agen update
+#   curl -fsSL https://raw.githubusercontent.com/neurowatt-dev/NeuroMed-AI/linebot/static/scripts/install.sh | bash
 #
 set -euo pipefail
 
 REPO_URL="https://github.com/neurowatt-dev/NeuroMed-AI.git"
 BRANCH="linebot"
+INSTALL_URL="https://raw.githubusercontent.com/neurowatt-dev/NeuroMed-AI/linebot/static/scripts/install.sh"
 GO_INSTALL_DIR="${HOME}/.local/go"
 REQUIRED_GO_MAJOR=1
 REQUIRED_GO_MINOR=26
+
+PKG_MGR=""
+SUDO=""
+
+SRC_DIR=""
+GO_TMP_DIR=""
+INSTALLED_REV=""
+SWAP_FILE=""
+LOW_MEM=0
+cleanup() {
+  stop_sudo_keepalive 2>/dev/null || true
+  if [ -n "$SRC_DIR" ] && [ -d "$SRC_DIR" ]; then
+    rm -rf "$SRC_DIR"
+  fi
+  if [ -n "$GO_TMP_DIR" ] && [ -d "$GO_TMP_DIR" ]; then
+    rm -rf "$GO_TMP_DIR"
+  fi
+  if [ -n "$SWAP_FILE" ] && [ -f "$SWAP_FILE" ]; then
+    if [ "$(id -u)" -eq 0 ]; then
+      swapoff "$SWAP_FILE" 2>/dev/null || true
+    elif command -v sudo >/dev/null 2>&1; then
+      sudo swapoff "$SWAP_FILE" 2>/dev/null || true
+    fi
+    rm -f "$SWAP_FILE" 2>/dev/null || true
+  fi
+}
+trap cleanup EXIT INT TERM
 
 if [ -t 1 ]; then
   C_RED=$'\033[0;31m'; C_GRN=$'\033[0;32m'; C_YLW=$'\033[0;33m'
@@ -24,9 +48,9 @@ else
 fi
 
 log()  { printf "%s==>%s %s\n" "$C_BLU" "$C_RST" "$*"; }
-ok()   { printf "%s ok%s %s\n" "$C_GRN" "$C_RST" "$*"; }
-warn() { printf "%s !!%s %s\n" "$C_YLW" "$C_RST" "$*"; }
-die()  { printf "%s xx%s %s\n" "$C_RED" "$C_RST" "$*" >&2; exit 1; }
+ok()   { printf "%s ok%s %s\n"  "$C_GRN" "$C_RST" "$*"; }
+warn() { printf "%s !!%s %s\n"  "$C_YLW" "$C_RST" "$*"; }
+die()  { printf "%s xx%s %s\n"  "$C_RED" "$C_RST" "$*" >&2; exit 1; }
 
 # A controlling terminal exists and is usable for prompting, even when stdin is
 # a pipe (the `curl … | bash` case).
@@ -41,59 +65,18 @@ is_admin_user() {
   esac
 }
 
-# "no sudo" collapses three distinct failures into one message. Report which
-# one actually applies so the user can act on it.
+# Homebrew collapses three distinct failures into "needs to be an Administrator".
+# Report which one actually applies so the user can act on it.
 sudo_unavailable_reason() {
   if ! command -v sudo >/dev/null 2>&1; then
-    printf '%s' "sudo is not installed. Run this updater as root, or install sudo first."
+    printf '%s' "sudo is not installed. Run this installer as root, or install sudo first."
     return 0
   fi
   if ! is_admin_user; then
     printf '%s' "User '$(whoami)' is not in the admin group, so root access cannot be obtained. Re-run as an administrator account."
     return 0
   fi
-  printf '%s' "No terminal is available to prompt for your sudo password, and the sudo timestamp is cold. This is NOT a permissions problem — '$(whoami)' is an administrator. Run 'sudo -v' first in this same terminal, then re-run."
-}
-
-print_done() {
-  local tag="$1"
-  local lines=(
-    "NeuroMed-AI ${tag} installed"
-    ""
-    "Next: run 'agen' to attach the new build"
-  )
-
-  local max=0 line len
-  for line in "${lines[@]}"; do
-    len=${#line}
-    [ "$len" -gt "$max" ] && max=$len
-  done
-
-  local pad_each=2
-  local inner=$((max + pad_each * 2))
-
-  local border="" rpad=""
-  local i=0
-  while [ $i -lt $inner ]; do
-    border="${border}─"
-    i=$((i + 1))
-  done
-
-  printf '\n%s╭%s╮%s\n' "$C_GRN" "$border" "$C_RST"
-  for line in "${lines[@]}"; do
-    rpad=""
-    i=0
-    while [ $i -lt $((max - ${#line})) ]; do
-      rpad="${rpad} "
-      i=$((i + 1))
-    done
-    printf '%s│%s  %s%s  %s│%s\n' "$C_GRN" "$C_RST" "$line" "$rpad" "$C_GRN" "$C_RST"
-  done
-  printf '%s╰%s╯%s\n\n' "$C_GRN" "$border" "$C_RST"
-}
-
-require_cmd() {
-  command -v "$1" >/dev/null 2>&1 || die "Missing required command: $1${2:+ ($2)}"
+  printf '%s' "No terminal is available to prompt for your sudo password, and the sudo timestamp is cold. This is NOT a permissions problem — '$(whoami)' is an administrator. Either run 'sudo -v' first in this same terminal (macOS ties the timestamp to the tty), or download the script and run it directly: curl -fsSL ${INSTALL_URL} -o install.sh && bash install.sh"
 }
 
 detect_platform() {
@@ -109,6 +92,177 @@ detect_platform() {
     *) die "Unsupported arch: $(uname -m)" ;;
   esac
   printf "%s-%s" "$os" "$arch"
+}
+
+require_cmd() {
+  command -v "$1" >/dev/null 2>&1 || die "Missing required command: $1${2:+ ($2)}"
+}
+
+ensure_homebrew_darwin() {
+  [ "$(uname -s)" = "Darwin" ] || return 0
+  command -v brew >/dev/null 2>&1 && { ok "Homebrew already installed"; return 0; }
+
+  case "$(uname -m)" in
+    arm64|aarch64) ;;
+    *) die "Homebrew not found. Install it from https://brew.sh, then re-run this installer." ;;
+  esac
+
+  warn "Homebrew not found, installing"
+
+  # Homebrew's installer needs root. Under `curl … | bash` our stdin is the curl
+  # pipe, so a plain `/bin/bash -c "$(…)"` child inherits a non-TTY stdin,
+  # Homebrew switches to NONINTERACTIVE, its have_sudo_access() falls back to
+  # `sudo -n`, and a cold sudo timestamp aborts with a misleading
+  # "needs to be an Administrator". Warm the timestamp ourselves and hand the
+  # child the real terminal.
+  local brew_script
+  brew_script="$(curl -fsSL --retry 3 --retry-delay 2 https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)" \
+    || die "Failed to download the Homebrew installer. Check network access to raw.githubusercontent.com, then re-run."
+  [ -n "$brew_script" ] || die "Downloaded Homebrew installer was empty; refusing to execute."
+
+  ensure_sudo || true
+
+  if have_tty; then
+    if ! /bin/bash -c "$brew_script" </dev/tty; then
+      die "Homebrew installation failed (see output above). Install it manually from https://brew.sh, then re-run this installer."
+    fi
+  else
+    # No controlling terminal at all (CI, MDM, remote provisioning).
+    # Homebrew cannot prompt, so root access must already be available.
+    if [ "$(id -u)" -ne 0 ] && ! sudo -n true 2>/dev/null; then
+      die "$(sudo_unavailable_reason)"
+    fi
+    if ! NONINTERACTIVE=1 /bin/bash -c "$brew_script"; then
+      die "Homebrew installation failed in non-interactive mode (see output above)."
+    fi
+  fi
+
+  [ -x /opt/homebrew/bin/brew ] || die "Homebrew install completed but brew binary not found in /opt/homebrew/bin"
+  eval "$(/opt/homebrew/bin/brew shellenv)"
+  command -v brew >/dev/null 2>&1 || die "brew still not on PATH after eval shellenv"
+  ok "Homebrew installed: $(brew --version | head -n 1)"
+}
+
+detect_pkg_mgr() {
+  if [ "$(id -u)" -ne 0 ] && command -v sudo >/dev/null 2>&1; then
+    SUDO="sudo"
+  fi
+  if   command -v apt-get >/dev/null 2>&1; then PKG_MGR=apt
+  elif command -v dnf     >/dev/null 2>&1; then PKG_MGR=dnf
+  elif command -v yum     >/dev/null 2>&1; then PKG_MGR=yum
+  elif command -v pacman  >/dev/null 2>&1; then PKG_MGR=pacman
+  elif command -v apk     >/dev/null 2>&1; then PKG_MGR=apk
+  elif command -v brew    >/dev/null 2>&1; then PKG_MGR=brew
+  fi
+  # An AND-list as the last statement returns 1 under `set -e` when no package
+  # manager is found, which would kill the installer with no message.
+  if [ -n "$PKG_MGR" ]; then
+    log "Package manager: $PKG_MGR"
+  else
+    warn "No supported package manager detected; dependencies must be installed manually"
+  fi
+}
+
+# Map logical package name -> distro-specific package
+resolve_pkg() {
+  case "$1:$PKG_MGR" in
+    poppler:pacman|poppler:brew) printf "poppler" ;;
+    poppler:*)                   printf "poppler-utils" ;;
+    python3:pacman)              printf "python" ;;
+    python3:*)                   printf "python3" ;;
+    nodejs:brew)                 printf "node" ;;
+    nodejs:*)                    printf "nodejs" ;;
+    bubblewrap:*)                printf "bubblewrap" ;;
+    libsecret:apt)               printf "libsecret-tools" ;;
+    libsecret:*)                 printf "libsecret" ;;
+    build-essential:apt)         printf "build-essential" ;;
+    build-essential:pacman)      printf "base-devel" ;;
+    build-essential:apk)         printf "build-base" ;;
+    build-essential:*)           printf "gcc" ;;
+    *)                           printf "%s" "$1" ;;
+  esac
+}
+
+pkg_install() {
+  local logical pkgs=()
+  for logical in "$@"; do pkgs+=("$(resolve_pkg "$logical")"); done
+  log "Installing: ${pkgs[*]} (via $PKG_MGR)"
+  case "$PKG_MGR" in
+    apt)
+      $SUDO apt-get update -y || warn "apt-get update failed, continuing"
+      $SUDO DEBIAN_FRONTEND=noninteractive apt-get install -y "${pkgs[@]}"
+      ;;
+    dnf)    $SUDO dnf install -y "${pkgs[@]}" ;;
+    yum)    $SUDO yum install -y "${pkgs[@]}" ;;
+    pacman) $SUDO pacman -Sy --noconfirm "${pkgs[@]}" ;;
+    apk)    $SUDO apk add --no-cache "${pkgs[@]}" ;;
+    brew)
+      local prefix; prefix="$(brew --prefix)"
+      if [ ! -w "$prefix" ]; then
+        warn "$prefix not writable, fixing ownership (sudo prompt expected)"
+        sudo chown -R "$(whoami)" "$prefix"
+      fi
+      brew install "${pkgs[@]}"
+      ;;
+    *) return 1 ;;
+  esac
+}
+
+confirm_overwrite_agen() {
+  command -v agen >/dev/null 2>&1 || return 0
+
+  local existing
+  existing="$(command -v agen)"
+  log "agen already installed at: $existing"
+
+  # stdin is the piped script, so read the answer from the terminal
+  if ! have_tty; then
+    log "Non-interactive shell; keeping existing agen"
+    exit 0
+  fi
+
+  printf "Overwrite existing agen? [y/N] " >/dev/tty
+  local ans=""
+  IFS= read -r ans </dev/tty || ans=""
+  case "$ans" in
+    y|Y|yes|YES|Yes) ok "Proceeding with reinstall" ;;
+    *)
+      ok "Keeping existing agen"
+      exit 0
+      ;;
+  esac
+}
+
+ensure_cmd() {
+  local cmd="$1" logical="${2:-$1}"
+  command -v "$cmd" >/dev/null 2>&1 && return 0
+
+  if [ "$(uname -s)" = "Darwin" ]; then
+    case "$cmd" in
+      make|git|cc|clang|gcc)
+        die "$cmd not found on macOS. Run 'xcode-select --install' then re-run this installer."
+        ;;
+    esac
+  fi
+
+  [ -n "$PKG_MGR" ] || die "$cmd not found and no supported package manager detected. Install '$logical' manually."
+
+  warn "$cmd missing, installing $logical"
+  pkg_install "$logical" || die "Failed to install $logical"
+  command -v "$cmd" >/dev/null 2>&1 || die "$cmd still missing after installing $logical"
+}
+
+# An explicit CGO_ENABLED=0 in the caller's environment survives into `make
+# build`: go-sqlite3 then compiles as static_mock.go, the build exits 0, and the
+# stub only errors at the first OpenDB. Refuse instead of shipping that binary.
+ensure_cgo_enabled() {
+  case "${CGO_ENABLED:-}" in
+    0)
+      die "CGO_ENABLED=0 is set in this environment; go-sqlite3 would build as a
+     non-functional stub. Run 'unset CGO_ENABLED' (or export CGO_ENABLED=1)
+     and re-run this installer."
+      ;;
+  esac
 }
 
 # returns 0 if "$1" (e.g. 1.26.0) >= REQUIRED
@@ -142,6 +296,7 @@ persist_go_path() {
   local export_line="export PATH=\"${GO_INSTALL_DIR}/bin:\$PATH\""
 
   if [ -f "$rc" ] && grep -Fq "$marker_begin" "$rc"; then
+    ok "Go PATH already persisted in $rc"
     return 0
   fi
 
@@ -153,84 +308,6 @@ persist_go_path() {
   } >> "$rc"
   ok "Persisted Go PATH to $rc"
   warn "Open a new shell or run: source $rc"
-}
-
-# go-sqlite3 is a cgo binding, and Go silently sets CGO_ENABLED=0 when no C
-# compiler is on PATH: the rebuild then succeeds and lands a stub driver that
-# fails only at the first OpenDB. Installed rather than merely required, the
-# same way this script already installs the go-rod dependencies below.
-ensure_toolchain() {
-  command -v cc >/dev/null 2>&1 && return 0
-
-  if [ "$(uname -s)" = "Darwin" ]; then
-    die "No C compiler found. Run 'xcode-select --install' then re-run this updater."
-  fi
-
-  local sudo=""
-  [ "$(id -u)" -ne 0 ] && command -v sudo >/dev/null 2>&1 && sudo="sudo"
-
-  log "No C compiler found; installing one (go-sqlite3 requires cgo)"
-  if command -v apt-get >/dev/null 2>&1; then
-    $sudo apt-get update -y || warn "apt-get update failed, continuing"
-    $sudo env DEBIAN_FRONTEND=noninteractive apt-get install -y build-essential
-  elif command -v dnf >/dev/null 2>&1; then
-    $sudo dnf install -y gcc
-  elif command -v yum >/dev/null 2>&1; then
-    $sudo yum install -y gcc
-  elif command -v pacman >/dev/null 2>&1; then
-    $sudo pacman -Sy --noconfirm base-devel
-  elif command -v apk >/dev/null 2>&1; then
-    $sudo apk add --no-cache build-base
-  else
-    die "No C compiler and no supported package manager. Install gcc manually, then re-run."
-  fi
-
-  command -v cc >/dev/null 2>&1 || die "C compiler still missing after install"
-  ok "C compiler ready"
-}
-
-# An explicit CGO_ENABLED=0 in the caller's environment survives into `make
-# build`: go-sqlite3 then compiles as static_mock.go, the build exits 0, and the
-# stub only errors at the first OpenDB. Refuse instead of shipping that binary.
-ensure_cgo_enabled() {
-  case "${CGO_ENABLED:-}" in
-    0)
-      die "CGO_ENABLED=0 is set in this environment; go-sqlite3 would build as a
-     non-functional stub. Run 'unset CGO_ENABLED' (or export CGO_ENABLED=1)
-     and re-run this updater."
-      ;;
-  esac
-}
-
-# go-rod launches ~/.cache/rod/browser/.../chrome directly (not apt's chromium
-# package), so apt won't pull its shared-lib deps automatically. libasound2 is
-# the one rod's chromium needs that a bare Debian/Ubuntu host lacks; minimal
-# WSL images additionally ship no CJK fonts, so Chinese renders as tofu boxes.
-ensure_chrome_deps() {
-  command -v apt-get >/dev/null 2>&1 || return 0
-  local sudo=""
-  [ "$(id -u)" -ne 0 ] && command -v sudo >/dev/null 2>&1 && sudo="sudo"
-
-  log "Ensuring libasound2 for go-rod (apt)"
-  $sudo apt-get update -y || warn "apt-get update failed, continuing"
-  if $sudo env DEBIAN_FRONTEND=noninteractive apt-get install -y libasound2 2>/dev/null; then
-    ok "libasound2 installed"
-  else
-    # Newer Ubuntu (24.04+) renamed libasound2 -> libasound2t64; retry with that name.
-    warn "libasound2 install failed, retrying with libasound2t64 (newer Ubuntu package name)"
-    if $sudo env DEBIAN_FRONTEND=noninteractive apt-get install -y libasound2t64; then
-      ok "libasound2t64 installed"
-    else
-      warn "Failed to install libasound2/libasound2t64; go-rod browser automation may not launch"
-    fi
-  fi
-
-  log "Ensuring CJK fonts for go-rod (apt)"
-  if $sudo env DEBIAN_FRONTEND=noninteractive apt-get install -y fonts-noto-cjk; then
-    ok "fonts-noto-cjk installed"
-  else
-    warn "Failed to install fonts-noto-cjk; Chinese/Japanese/Korean text may render as tofu boxes"
-  fi
 }
 
 # go.dev/dl/<file>.sha256 answers 200 with an HTML redirect page, not a
@@ -258,7 +335,6 @@ verify_go_checksum() {
   ok "Checksum verified"
 }
 
-GO_TMP_DIR=""
 install_go() {
   local platform="$1"
   local version url tarball
@@ -286,12 +362,42 @@ install_go() {
   persist_go_path
 }
 
+# go-rod launches ~/.cache/rod/browser/.../chrome directly (not apt's chromium
+# package), so apt won't pull its shared-lib deps automatically. libasound2 is
+# the one rod's chromium needs that a bare Debian/Ubuntu host lacks; minimal
+# WSL images additionally ship no CJK fonts, so Chinese renders as tofu boxes.
+ensure_chrome_deps() {
+  [ "$PKG_MGR" = "apt" ] || return 0
+
+  log "Ensuring libasound2 for go-rod (apt)"
+  $SUDO apt-get update -y || warn "apt-get update failed, continuing"
+  if $SUDO DEBIAN_FRONTEND=noninteractive apt-get install -y libasound2 2>/dev/null; then
+    ok "libasound2 installed"
+  else
+    # Newer Ubuntu (24.04+) renamed libasound2 -> libasound2t64; retry with that name.
+    warn "libasound2 install failed, retrying with libasound2t64 (newer Ubuntu package name)"
+    if $SUDO DEBIAN_FRONTEND=noninteractive apt-get install -y libasound2t64; then
+      ok "libasound2t64 installed"
+    else
+      warn "Failed to install libasound2/libasound2t64; go-rod browser automation may not launch"
+    fi
+  fi
+
+  log "Ensuring CJK fonts for go-rod (apt)"
+  if $SUDO DEBIAN_FRONTEND=noninteractive apt-get install -y fonts-noto-cjk; then
+    ok "fonts-noto-cjk installed"
+  else
+    warn "Failed to install fonts-noto-cjk; Chinese/Japanese/Korean text may render as tofu boxes"
+  fi
+}
+
 ensure_go() {
-  local platform; platform="$(detect_platform)"
+  local platform="$1"
   local current
 
-  # Probe canonical install dir if go isn't on PATH (install.sh writes here
-  # but the caller's shell rc may not have been sourced in this subprocess).
+  # Prefer existing go on PATH; otherwise probe the canonical install dir
+  # so subsequent invocations (and `agen update` subprocesses) can find it
+  # even when the user's shell rc was never updated.
   if ! command -v go >/dev/null 2>&1 && [ -x "${GO_INSTALL_DIR}/bin/go" ]; then
     export PATH="${GO_INSTALL_DIR}/bin:${PATH}"
   fi
@@ -299,6 +405,7 @@ ensure_go() {
   if current="$(current_go_version)" && [ -n "$current" ]; then
     if go_version_ok "$current"; then
       ok "Go $current already meets >= ${REQUIRED_GO_MAJOR}.${REQUIRED_GO_MINOR}"
+      # Still persist PATH if go was found via probe but rc isn't wired
       if [ "$(command -v go)" = "${GO_INSTALL_DIR}/bin/go" ]; then
         persist_go_path
       fi
@@ -306,25 +413,26 @@ ensure_go() {
     fi
     warn "Go $current < ${REQUIRED_GO_MAJOR}.${REQUIRED_GO_MINOR}, upgrading"
   else
-    warn "Go not found, bootstrapping"
+    warn "Go not found, installing"
   fi
   install_go "$platform"
 }
 
-SRC_DIR=""
-SWAP_FILE=""
-LOW_MEM=0
-SUDO_KEEPALIVE_PID=""
-
-stop_sudo_keepalive() {
-  if [ -n "${SUDO_KEEPALIVE_PID:-}" ]; then
-    kill "$SUDO_KEEPALIVE_PID" 2>/dev/null || true
-    wait "$SUDO_KEEPALIVE_PID" 2>/dev/null || true
-    SUDO_KEEPALIVE_PID=""
-  fi
+clone_repo() {
+  SRC_DIR="$(mktemp -d "${TMPDIR:-/tmp}/neuromed-install.XXXXXX")"
+  log "Cloning ${BRANCH} branch -> ${SRC_DIR}"
+  git clone --depth 1 --branch "$BRANCH" "$REPO_URL" "$SRC_DIR"
+  INSTALLED_REV="$(cd "$SRC_DIR" && git rev-parse --short HEAD)"
+  ok "Cloned ${BRANCH}@${INSTALLED_REV}"
 }
 
+# Low-RAM hosts (e.g. free-tier VMs) OOM-kill go compile with:
+#   .../compile: signal: killed
+# Cap package parallelism, create temporary swap, and pre-build heavy packages
+# one-by-one so a single large compile does not peak with others.
+
 # Keep sudo timestamp warm during long builds (so swap + install don't re-prompt).
+SUDO_KEEPALIVE_PID=""
 start_sudo_keepalive() {
   command -v sudo >/dev/null 2>&1 || return 0
   sudo -n true 2>/dev/null || return 0
@@ -337,24 +445,13 @@ start_sudo_keepalive() {
   SUDO_KEEPALIVE_PID=$!
 }
 
-cleanup() {
-  stop_sudo_keepalive 2>/dev/null || true
-  if [ -n "$SRC_DIR" ] && [ -d "$SRC_DIR" ]; then
-    rm -rf "$SRC_DIR"
-  fi
-  if [ -n "$GO_TMP_DIR" ] && [ -d "$GO_TMP_DIR" ]; then
-    rm -rf "$GO_TMP_DIR"
-  fi
-  if [ -n "$SWAP_FILE" ] && [ -f "$SWAP_FILE" ]; then
-    if [ "$(id -u)" -eq 0 ]; then
-      swapoff "$SWAP_FILE" 2>/dev/null || true
-    elif command -v sudo >/dev/null 2>&1; then
-      sudo swapoff "$SWAP_FILE" 2>/dev/null || true
-    fi
-    rm -f "$SWAP_FILE" 2>/dev/null || true
+stop_sudo_keepalive() {
+  if [ -n "${SUDO_KEEPALIVE_PID:-}" ]; then
+    kill "$SUDO_KEEPALIVE_PID" 2>/dev/null || true
+    wait "$SUDO_KEEPALIVE_PID" 2>/dev/null || true
+    SUDO_KEEPALIVE_PID=""
   fi
 }
-trap cleanup EXIT INT TERM
 
 # Acquire root for temporary swap + later /usr/local/bin install.
 # Works under `curl | bash` by prompting on /dev/tty when needed.
@@ -385,24 +482,32 @@ path_avail_kb() {
   df -Pk "$dir" 2>/dev/null | awk 'NR==2 { print $4 }'
 }
 
-print_host_status() {
+# Host readiness report — always run on Linux low-mem path so the installer
+# itself does the "df / free / swapon" checklist instead of dumping commands.
+report_host_resources() {
   [ "$(uname -s)" = "Linux" ] || return 0
-  log "Host memory / disk (low-RAM build prep)"
+  log "Host resources before build"
   if command -v free >/dev/null 2>&1; then
-    free -h 2>/dev/null || true
+    free -h 2>/dev/null | sed 's/^/    /' || true
   elif [ -r /proc/meminfo ]; then
-    awk '/MemTotal:|MemAvailable:|SwapTotal:|SwapFree:/ {printf "  %s %s %s\n", $1, $2, $3}' /proc/meminfo 2>/dev/null || true
+    awk '/MemTotal:|MemAvailable:|SwapTotal:|SwapFree:/ { printf "    %s\n", $0 }' /proc/meminfo
+  fi
+  if command -v df >/dev/null 2>&1; then
+    printf "    -- disk --\n"
+    df -h / "$HOME" 2>/dev/null | sed 's/^/    /' || true
   fi
   if command -v swapon >/dev/null 2>&1; then
-    swapon --show 2>/dev/null || true
+    printf "    -- swap devices --\n"
+    local out
+    out="$(swapon --show 2>/dev/null || true)"
+    if [ -n "$out" ]; then
+      printf "%s\n" "$out" | sed 's/^/    /'
+    else
+      printf "    (none)\n"
+    fi
   fi
-  df -h / 2>/dev/null || true
 }
 
-# Low-RAM hosts (e.g. free-tier VMs) OOM-kill go compile with:
-#   .../compile: signal: killed
-# Cap package parallelism, create temporary swap, and pre-build heavy packages
-# one-by-one so a single large compile does not peak with others.
 ensure_build_swap() {
   [ "$(uname -s)" = "Linux" ] || return 0
   [ -r /proc/meminfo ] || return 0
@@ -414,6 +519,8 @@ ensure_build_swap() {
     ok "Existing swap: ${swap_kb} kB"
     return 0
   fi
+
+  report_host_resources
 
   # Prefer classic /swapfile on the root disk first, then $HOME, then /var/tmp.
   # Never use tmpfs/ramfs (swap on RAM makes OOM worse).
@@ -427,7 +534,7 @@ ensure_build_swap() {
   local size_mb need_kb path dir fstype avail last_err=""
 
   if ! ensure_sudo; then
-    warn "Cannot create temporary swap automatically: $(sudo_unavailable_reason)"
+    warn "No sudo/root available — cannot create temporary swap automatically."
     # Interactive: walk the user through the exact steps on this host.
     if have_tty; then
       warn "Interactive swap setup required (passwordless sudo missing)."
@@ -499,6 +606,7 @@ ensure_build_swap() {
     # Prefer fully-written file (dd) on low-mem hosts — fallocate can leave
     # holes that swapon rejects on some filesystems.
     local allocated=0
+    # Use dd first when we already know memory is tight (more reliable swapon).
     if [ "${LOW_MEM:-0}" -eq 1 ] 2>/dev/null; then
       log "Allocating ${size_mb} MiB swap at $path (dd; may take a minute)"
       if sudo dd if=/dev/zero of="$path" bs=1M count="$size_mb" status=progress 2>/dev/tty \
@@ -543,12 +651,11 @@ ensure_build_swap() {
     local swapon_out
     if swapon_out="$(sudo swapon "$path" 2>&1)"; then
       SWAP_FILE="$path"
-      warn "Created temporary ${size_mb} MiB swap at $path (removed after update)"
+      warn "Created temporary ${size_mb} MiB swap at $path (removed after install)"
       return 0
     fi
     # fallocate sparse / CoW / missing CAP_SYS_ADMIN often land here
     last_err="$path: swapon failed: ${swapon_out:-unknown (no CAP_SYS_ADMIN / CoW fs / sparse file?)}"
-
     # Retry once with dd if we used fallocate (fills holes).
     if command -v fallocate >/dev/null 2>&1; then
       sudo swapoff "$path" 2>/dev/null || true
@@ -564,7 +671,7 @@ ensure_build_swap() {
         sudo mkswap "$path" >/dev/null 2>&1 || mkswap "$path" >/dev/null 2>&1 || true
         if swapon_out="$(sudo swapon "$path" 2>&1)"; then
           SWAP_FILE="$path"
-          warn "Created temporary ${size_mb} MiB swap at $path via dd (removed after update)"
+          warn "Created temporary ${size_mb} MiB swap at $path via dd (removed after install)"
           return 0
         fi
         last_err="$path: swapon failed after dd: ${swapon_out:-unknown}"
@@ -597,6 +704,7 @@ ensure_build_swap() {
     swap_kb="$(awk '/SwapTotal:/ {print $2}' /proc/meminfo 2>/dev/null || true)"
     if [ -n "$swap_kb" ] && [ "$swap_kb" -ge 524288 ] 2>/dev/null; then
       ok "Detected swap after manual setup: ${swap_kb} kB"
+      # Do not track /swapfile for auto-removal if user created it permanently.
       return 0
     fi
   fi
@@ -627,13 +735,13 @@ configure_build_env() {
   if [ -n "$mem_kb" ] && [ "$mem_kb" -lt 5242880 ] 2>/dev/null; then
     LOW_MEM=1
     warn "Low memory detected (${mem_kb} kB < 5 GiB)"
-    print_host_status
+    report_host_resources
     apply_low_mem_env
     log "Step 1/3: ensure swap (auto, else interactive instructions on this host)"
     if ! ensure_build_swap; then
-      die "Low-memory host has no usable swap. Add >=1-2 GiB swap, then re-run. Refusing to build (would OOM)."
+      die "Low-memory host has no usable swap. Create >=1-2 GiB swap, then re-run."
     fi
-    print_host_status
+    report_host_resources
   fi
 }
 
@@ -651,51 +759,65 @@ HEAVY_PKGS=(
   "github.com/cloudwego/base64x"
 )
 
-staged_prebuild() {
-  [ "${LOW_MEM:-0}" -eq 1 ] || return 0
-  [ -n "$SRC_DIR" ] && [ -d "$SRC_DIR" ] || return 0
-
-  log "Step 2/3: staged prebuild (one heavy package at a time)"
+# Staged build for low-mem hosts:
+#   1) go mod download
+#   2) pre-compile heavy packages one-by-one (cache objects)
+#   3) final make build (remaining pkgs + cgo + link + install)
+staged_low_mem_build() {
+  cd "$SRC_DIR" || return 1
   apply_low_mem_env
 
+  log "Step 2/3: staged prebuild"
+  log "  2a) go mod download"
+  if ! go mod download; then
+    warn "go mod download failed; continuing (build may re-fetch)"
+  fi
+
+  log "  2b) pre-build heavy packages one-by-one (avoids multi-pkg RSS spike)"
+  local pkg i=0 n=${#HEAVY_PKGS[@]}
+  for pkg in "${HEAVY_PKGS[@]}"; do
+    i=$((i + 1))
+    # Skip packages not in this module graph (older/newer branch state).
+    if ! go list -f '{{.ImportPath}}' "$pkg" >/dev/null 2>&1; then
+      log "  [${i}/${n}] skip $pkg (not in module graph)"
+      continue
+    fi
+    log "  [${i}/${n}] go build -p=1 $pkg"
+    local memlimit="${GOMEMLIMIT:-1000MiB}"
+    if [ "$pkg" = "github.com/ugorji/go/codec" ]; then
+      memlimit="800MiB"
+    fi
+    if ! GOMEMLIMIT="$memlimit" go build -p=1 "$pkg"; then
+      warn "  pre-build failed for $pkg (will retry during final make build)"
+    else
+      ok "  cached $pkg"
+    fi
+    # Let kernel reclaim compiler RSS / page cache before next peak.
+    sleep 1
+  done
+
+  log "Step 3/3: final make build (remaining packages + link + install)"
+  make build
+}
+
+run_make_build() {
   (
     cd "$SRC_DIR" || exit 1
-    export GOMAXPROCS=1
-    export GOFLAGS="-p=1"
+    export GOMAXPROCS="${GOMAXPROCS:-1}"
+    export GOFLAGS="${GOFLAGS:--p=1}"
     export GOGC="${GOGC:-25}"
     export GOMEMLIMIT="${GOMEMLIMIT:-1000MiB}"
-
-    log "  2a) go mod download"
-    go mod download || warn "go mod download failed; continuing"
-
-    log "  2b) pre-build heavy packages one-by-one"
-    local p i=0 n=${#HEAVY_PKGS[@]}
-    for p in "${HEAVY_PKGS[@]}"; do
-      i=$((i + 1))
-      # Skip packages not in this module graph (older/newer branch state).
-      if ! go list -f '{{.ImportPath}}' "$p" >/dev/null 2>&1; then
-        log "  [${i}/${n}] skip $p (not in module graph)"
-        continue
-      fi
-      log "  [${i}/${n}] go build -p=1 $p"
-      local memlimit="${GOMEMLIMIT:-1000MiB}"
-      if [ "$p" = "github.com/ugorji/go/codec" ]; then
-        memlimit="800MiB"
-      fi
-      if GOMEMLIMIT="$memlimit" go build -p=1 "$p"; then
-        ok "  cached: $p"
-      else
-        warn "  pre-compile failed for $p (will retry in make build)"
-      fi
-      # Let kernel reclaim compiler RSS / page cache before next peak.
-      sleep 1
-    done
+    if [ "${LOW_MEM:-0}" -eq 1 ]; then
+      staged_low_mem_build
+    else
+      make build
+    fi
   )
 }
 
 # `command -v agen` succeeding proves nothing: a stale copy earlier on PATH
 # (~/.local/bin, brew) answers the same way and the user keeps running the old
-# binary while the updater reports success.
+# binary while the installer reports success.
 verify_path_resolution() {
   hash -r 2>/dev/null || true
   local resolved
@@ -707,43 +829,17 @@ verify_path_resolution() {
   fi
 }
 
-run_make_build() {
-  (
-    cd "$SRC_DIR" || exit 1
-    export GOMAXPROCS="${GOMAXPROCS:-1}"
-    export GOFLAGS="${GOFLAGS:--p=1}"
-    export GOGC="${GOGC:-25}"
-    export GOMEMLIMIT="${GOMEMLIMIT:-1000MiB}"
-    make build
-  )
-}
-
-main() {
-  log "NeuroMed-AI updater (linebot branch)"
-
-  require_cmd curl
-  require_cmd git
-  require_cmd make
-  require_cmd tar
-  ensure_cgo_enabled
-  ensure_toolchain
-  ensure_chrome_deps
-  ensure_go
-
-  SRC_DIR="$(mktemp -d "${TMPDIR:-/tmp}/neuromed-update.XXXXXX")"
-  log "Cloning ${BRANCH} branch -> ${SRC_DIR}"
-  git clone --depth 1 --branch "$BRANCH" "$REPO_URL" "$SRC_DIR"
-
-  local rev
-  rev="$(cd "$SRC_DIR" && git rev-parse --short HEAD)"
-  log "HEAD: ${rev}"
-
+build_and_install() {
   configure_build_env
-  staged_prebuild
+  if [ "${LOW_MEM:-0}" -eq 1 ]; then
+    log "Building with low-memory staged pipeline (sudo may prompt for /usr/local/bin)"
+  else
+    log "Building (sudo prompt expected for /usr/local/bin install)"
+  fi
 
-  log "Step 3/3: Building (sudo prompt expected for /usr/local/bin install)"
   local build_log
   build_log="$(mktemp "${TMPDIR:-/tmp}/neuromed-build.XXXXXX")"
+
   set +e
   run_make_build >"$build_log" 2>&1
   local rc=$?
@@ -753,16 +849,15 @@ main() {
     cat "$build_log" >&2
     # Retry once: re-assert single-package + try swap if missing, then staged rebuild.
     if grep -qE 'signal: killed|cannot allocate memory|out of memory' "$build_log"; then
-      warn "Build OOM-killed; re-staging heavy packages then retry once"
+      warn "Build OOM-killed; forcing low-mem staged rebuild"
       LOW_MEM=1
       apply_low_mem_env
       export GOMEMLIMIT=800MiB
-      print_host_status
+      report_host_resources
       ensure_build_swap || true
-      staged_prebuild || true
       if ! run_make_build; then
         rm -f "$build_log"
-        die "Build failed after low-memory retry. Free RAM, ensure >=1-2 GiB swap, or use a larger VM."
+        die "Build failed after low-memory staged retry. Free RAM, ensure >=1 GiB swap is active (free -h), or use a larger VM, then re-run."
       fi
     else
       rm -f "$build_log"
@@ -776,12 +871,89 @@ main() {
 
   [ -x /usr/local/bin/agen ] || die "Build reported success but /usr/local/bin/agen is missing"
   verify_path_resolution
-  ok "Updated to ${BRANCH}@${rev} at /usr/local/bin/agen"
+  ok "agen installed at /usr/local/bin/agen"
+}
 
-  log "Stopping old daemon (if any) so the new binary takes effect"
+stop_daemon() {
+  log "Stopping existing daemon (if any) so the new binary takes effect"
   /usr/local/bin/agen stop || true
+}
 
-  print_done "${BRANCH}@${rev}"
+print_done() {
+  local tag="${1:-installed}"
+  local lines=(
+    "NeuroMed-AI ${tag} installed"
+    ""
+    "Next: run 'agen' to attach the new build"
+  )
+
+  local max=0 line len
+  for line in "${lines[@]}"; do
+    len=${#line}
+    [ "$len" -gt "$max" ] && max=$len
+  done
+
+  local pad_each=2
+  local inner=$((max + pad_each * 2))
+
+  local border="" rpad=""
+  local i=0
+  while [ $i -lt $inner ]; do
+    border="${border}─"
+    i=$((i + 1))
+  done
+
+  printf '\n%s╭%s╮%s\n' "$C_GRN" "$border" "$C_RST"
+  for line in "${lines[@]}"; do
+    rpad=""
+    i=0
+    while [ $i -lt $((max - ${#line})) ]; do
+      rpad="${rpad} "
+      i=$((i + 1))
+    done
+    printf '%s│%s  %s%s  %s│%s\n' "$C_GRN" "$C_RST" "$line" "$rpad" "$C_GRN" "$C_RST"
+  done
+  printf '%s╰%s╯%s\n\n' "$C_GRN" "$border" "$C_RST"
+}
+
+main() {
+  log "NeuroMed-AI installer (linebot branch)"
+  local platform; platform="$(detect_platform)"
+  log "Platform: $platform"
+
+  confirm_overwrite_agen
+
+  require_cmd curl
+  require_cmd uname
+
+  ensure_cgo_enabled
+  ensure_homebrew_darwin
+  detect_pkg_mgr
+  ensure_cmd tar
+  ensure_cmd git
+  ensure_cmd make
+  # go-sqlite3 is a cgo binding: with no C compiler on PATH, Go silently sets
+  # CGO_ENABLED=0, the build still succeeds, and the driver is compiled as a
+  # stub that fails only at the first OpenDB — "requires cgo to work".
+  ensure_cmd cc build-essential
+  ensure_cmd pdftotext poppler
+  ensure_cmd python3
+  ensure_cmd node nodejs
+
+  # Linux sandbox requires bubblewrap; macOS uses built-in sandbox-exec
+  if [ "$(uname -s)" = "Linux" ]; then
+    ensure_cmd bwrap bubblewrap
+    # keychain: go-pkg/filesystem/keychain shells out to secret-tool on linux
+    # and, when it fails, silently writes secrets to a plaintext .secrets file
+    ensure_cmd secret-tool libsecret
+  fi
+  ensure_chrome_deps
+
+  ensure_go "$platform"
+  clone_repo
+  build_and_install
+  stop_daemon
+  print_done "${BRANCH}@${INSTALLED_REV}"
 }
 
 main "$@"

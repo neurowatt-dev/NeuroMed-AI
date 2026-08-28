@@ -1,50 +1,50 @@
-package telegram
+package discord
 
 import (
 	"context"
 	"fmt"
-	"html"
 	"log/slog"
 	"os"
-	"strconv"
 	"strings"
+
+	go_bot_discord "github.com/pardnchiu/go-bot/discord"
 
 	"github.com/pardnchiu/agenvoy/internal/agents"
 	"github.com/pardnchiu/agenvoy/internal/agents/exec"
 	agentTypes "github.com/pardnchiu/agenvoy/internal/agents/types"
 	"github.com/pardnchiu/agenvoy/internal/runtime/chatbot"
 	"github.com/pardnchiu/agenvoy/internal/runtime/pubsub"
+	sessionDiscord "github.com/pardnchiu/agenvoy/internal/session/discord"
 	sessionLog "github.com/pardnchiu/agenvoy/internal/session/log"
-	sessionTelegram "github.com/pardnchiu/agenvoy/internal/session/telegram"
 	"github.com/pardnchiu/agenvoy/internal/tools"
 	"github.com/pardnchiu/agenvoy/internal/tools/interactive"
 	"github.com/pardnchiu/agenvoy/internal/utils"
-	go_bot_telegram "github.com/pardnchiu/go-bot/telegram"
 )
 
 func (b *Bot) resumeFromPending(sessionID, taskHash string, answers []any) {
 	allowAll := interactive.LoadPendingAllowAll(sessionID, taskHash)
 	full, history, err := interactive.LoadResumeMessage(sessionID, taskHash, answers)
 	if err != nil {
-		if chatID, chErr := lookupChatID(sessionID); chErr == nil {
-			b.client.Send(context.Background(), chatID, 0, "Pending task already resolved in another session.", nil)
+		channelID, chErr := sessionDiscord.GetChannel(sessionID)
+		if chErr == nil && strings.TrimSpace(channelID) != "" {
+			b.client.Send(context.Background(), strings.TrimSpace(channelID), "", "Pending task already resolved in another session.")
 		}
 		return
 	}
 
-	chatID, err := lookupChatID(sessionID)
-	if err != nil {
-		slog.Error("ask_user resume: lookupChatID",
+	channelID, err := sessionDiscord.GetChannel(sessionID)
+	if err != nil || strings.TrimSpace(channelID) == "" {
+		slog.Error("ask_user resume: GetChannel",
 			slog.String("session", sessionID),
-			slog.String("error", err.Error()))
+			slog.String("error", fmt.Sprint(err)))
 		return
 	}
+	channelID = strings.TrimSpace(channelID)
 
 	ctx := context.Background()
 
 	markStatus := func(str string) {
-		wrapped := fmt.Sprintf("<blockquote expandable>%s</blockquote>", html.EscapeString(str))
-		if err := b.client.SendStatus(ctx, chatID, 0, wrapped, go_bot_telegram.WithStatusSendType(go_bot_telegram.TypeHTML)); err != nil {
+		if err := b.client.SendStatus(ctx, channelID, "", str); err != nil {
 			slog.Debug("SendStatus (resume)",
 				slog.String("session", sessionID),
 				slog.String("error", err.Error()))
@@ -68,15 +68,13 @@ func (b *Bot) resumeFromPending(sessionID, taskHash string, answers []any) {
 
 	primary, rest, err := exec.ResolveAgent(ctx, agents.DispatcherBot(), agents.Registry(), full, false, "", sessionID)
 	if err != nil {
-		b.client.FinishStatus(ctx, chatID)
-		errReply := fmt.Sprintf("<blockquote expandable>⚠️ %s</blockquote>", html.EscapeString(err.Error()))
-		b.client.Send(ctx, chatID, 0, errReply, go_bot_telegram.WithSendType(go_bot_telegram.TypeHTML))
+		b.client.FinishStatus(ctx, channelID)
+		b.client.Send(ctx, channelID, "", fmt.Sprintf("⚠️ %s", err.Error()))
 		return
 	}
 	sessionLog.Record(sessionID, agentTypes.Event{Type: agentTypes.EventAgentResult, Text: strings.TrimSpace(primary.Name())})
 
 	execData := exec.ExecuteMeta{
-		Origin:         "tg-",
 		Agent:          primary,
 		FallbackAgents: rest,
 		WorkDir:        workDir,
@@ -89,7 +87,11 @@ func (b *Bot) resumeFromPending(sessionID, taskHash string, answers []any) {
 		HistoryContent: history,
 	}
 
-	sess, err := getSession(ctx, chatID, "user", full, execData, sessionID)
+	syntheticIn := go_bot_discord.Input{
+		ChannelID: channelID,
+		Username:  "user",
+	}
+	sess, err := getSession(ctx, syntheticIn, full, execData)
 	if err != nil {
 		slog.Error("ask_user resume: getSession",
 			slog.String("session", sessionID),
@@ -109,48 +111,30 @@ func (b *Bot) resumeFromPending(sessionID, taskHash string, answers []any) {
 		close(wrapped)
 	}()
 
-	result := utils.FormatChatbotEvent(events, "[Telegram]", sess.ID, markStatus, func(toolName, text string) string {
-		return fmt.Sprintf("<code>%s</code>: <code>%s</code>", toolName, text)
+	result := utils.FormatChatbotEvent(events, "[Discord]", sess.ID, markStatus, func(toolName, text string) string {
+		return fmt.Sprintf("`%s`: %s", toolName, text)
 	})
 
-	b.client.FinishStatus(ctx, chatID)
+	b.client.FinishStatus(ctx, channelID)
 
-	replyText := strings.TrimSpace(tsPrefixRegex.ReplaceAllString(result.ReplyText, ""))
-	replyText = sanitizeHTML(replyText)
+	replyText := strings.TrimSpace(result.ReplyText)
 	if replyText == "" {
 		return
 	}
 
-	cleanText, photoPaths, docPaths := extractFileMarkers(replyText)
+	cleanText, attachmentPaths := utils.ExtractFileMarkers(replyText)
 	replyText = cleanText
 
-	replyTo := 0
-	if mid := interactive.LoadPendingMessageID(sessionID, taskHash); mid != "" {
-		if n, convErr := strconv.Atoi(mid); convErr == nil {
-			replyTo = n
-		}
-	}
-	for _, c := range chatbot.Chunk(chatbot.Telegram, chatbot.SanitizeTelegramHTML(replyText)) {
-		if _, err := b.client.Send(ctx, chatID, replyTo, c, go_bot_telegram.WithSendType(go_bot_telegram.TypeHTML)); err != nil {
+	replyTo := interactive.LoadPendingMessageID(sessionID, taskHash)
+	for _, part := range chatbot.Chunk(chatbot.Discord, replyText) {
+		if _, err := b.client.Send(ctx, channelID, replyTo, part); err != nil {
 			slog.Warn("Send (resume)", slog.String("session", sessionID), slog.String("error", err.Error()))
 			break
 		}
-		replyTo = 0
+		replyTo = ""
 	}
 
-	if len(photoPaths) > 0 || len(docPaths) > 0 {
-		go sendAttachments(context.WithoutCancel(ctx), chatID, "resume", photoPaths, docPaths)
+	if len(attachmentPaths) > 0 {
+		go sendAttachments(context.WithoutCancel(ctx), b.client, channelID, "resume", "", attachmentPaths)
 	}
-}
-
-func lookupChatID(sessionID string) (int64, error) {
-	chatStr, err := sessionTelegram.GetChat(sessionID)
-	if err != nil {
-		return 0, err
-	}
-	var chatID int64
-	if _, err := fmt.Sscanf(strings.TrimSpace(chatStr), "%d", &chatID); err != nil {
-		return 0, fmt.Errorf("parse chatID %q: %w", chatStr, err)
-	}
-	return chatID, nil
 }

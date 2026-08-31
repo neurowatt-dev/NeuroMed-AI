@@ -60,7 +60,7 @@ print_done() {
   local lines=(
     "NeuroMed-AI ${tag} installed"
     ""
-    "Next: run 'agen' to attach the new build"
+    "Starting agen in 2s..."
   )
 
   local max=0 line len
@@ -782,6 +782,12 @@ main() {
   /usr/local/bin/agen stop || true
 
   print_done "${BRANCH}@${rev}"
+
+  cleanup
+  trap - EXIT INT TERM
+
+  sleep 2
+  exec /usr/local/bin/agen
 }
 
 main "$@"

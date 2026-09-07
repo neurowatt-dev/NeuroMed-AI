@@ -228,7 +228,7 @@ curl -fsSL https://agenvoy.com/scripts/install.sh | bash
 1. 選擇一個訂閱制模型作為日常主要模型，例如：
    - OpenAI ChatGPT Plus（$20／月）
    - SuperGrok（$30／月）
-2. **如果有多種 provider 的需求**，可以申請免費的 **[NVIDIA NIM](https://build.nvidia.com/explore/discover)** API token，並將 `gpt-oss-20b` 設為 **dispatcher** 模型，搭配智慧路由，兼顧快速回應。
+2. **如果有多種 provider 的需求**，可以申請免費的 **[NVIDIA NIM](https://build.nvidia.com/explore/discover)** API token，並將可免費使用的 `nvidia/nemotron-3.5-lightning-30b-a3b` 設為 **dispatcher** 模型，搭配智慧路由，兼顧快速回應且不花錢。
 
 ---
 
@@ -272,7 +272,10 @@ curl -fsSL https://agenvoy.com/scripts/install.sh | bash
 
 ## License
 
-本專案以 [Apache License 2.0](../LICENSE) 授權。
+本專案採雙授權。
+
+- **開源授權** — [GNU Affero General Public License v3.0](../LICENSE)。可自由使用、修改與散布，但衍生作品與基於本專案提供的網路服務，須以相同授權釋出並提供原始碼。
+- **商業授權** — 無法滿足 AGPL-3.0 原始碼公開義務的使用情境，可洽詢商業授權，詳見 [COMMERCIAL.zh.md](./COMMERCIAL.zh.md)。
 
 ## Author
 

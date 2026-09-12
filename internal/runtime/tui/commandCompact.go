@@ -26,7 +26,7 @@ type CompactDone struct {
 func (t TUI) commandCompact() (TUI, tea.Cmd, bool) {
 	sid := strings.TrimSpace(t.currentSessionID)
 	if sid == "" {
-		return t, tea.Println(hintStyle.Render("no active session") + "\n"), true
+		return t, tea.Println(msgLog("no active session") + "\n"), true
 	}
 
 	label := utils.ShortenSessionID(sid)
@@ -51,7 +51,7 @@ func (t TUI) runCompact(sid string) (TUI, tea.Cmd) {
 	t.activity = "compacting history..."
 
 	return t, tea.Batch(
-		tea.Println(hintStyle.Render(fmt.Sprintf("⎯ compacting history for %s...", utils.ShortenSessionID(sid)))+"\n"),
+		tea.Println(msgLog(fmt.Sprintf("compacting history for %s...", utils.ShortenSessionID(sid)))+"\n"),
 		t.spinner.Tick,
 		func() tea.Msg {
 			ctx := context.Background()
@@ -67,7 +67,7 @@ func (t TUI) finishCompact(msg CompactDone) (TUI, tea.Cmd) {
 	t.runTarget = ""
 
 	if msg.err != nil {
-		return t, tea.Println(errorStyle.Render(fmt.Sprintf("[!] compact failed: %v", msg.err)) + "\n")
+		return t, tea.Println(msgError(fmt.Sprintf("compact failed: %v", msg.err)) + "\n")
 	}
 
 	t.tokens = 0
@@ -76,9 +76,9 @@ func (t TUI) finishCompact(msg CompactDone) (TUI, tea.Cmd) {
 	t.lastCacheRead = 0
 	t.lastCacheCreate = 0
 
-	hint := fmt.Sprintf("⎯ compact: %s (nothing to remove)", utils.ShortenSessionID(msg.id))
+	hint := fmt.Sprintf("compact: %s (nothing to remove)", utils.ShortenSessionID(msg.id))
 	if msg.removed > 0 {
-		hint = fmt.Sprintf("⎯ compact: %s (%d messages removed)", utils.ShortenSessionID(msg.id), msg.removed)
+		hint = fmt.Sprintf("compact: %s (%d messages removed)", utils.ShortenSessionID(msg.id), msg.removed)
 	}
 
 	seq := []tea.Cmd{
@@ -87,10 +87,10 @@ func (t TUI) finishCompact(msg CompactDone) (TUI, tea.Cmd) {
 	}
 	tail := loadSessionTail(msg.id, t.width, false)
 	if len(tail) == 0 {
-		seq = append(seq, tea.Println(hintStyle.Render("⎯ no history yet")+"\n"))
+		seq = append(seq, tea.Println(msgLog("no history yet")+"\n"))
 	} else {
 		seq = append(seq, tail...)
 	}
-	seq = append(seq, tea.Println(hintStyle.Render(hint)+"\n"))
+	seq = append(seq, tea.Println(msgLog(hint)+"\n"))
 	return t, tea.Sequence(seq...)
 }

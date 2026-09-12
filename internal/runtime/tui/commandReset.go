@@ -26,14 +26,14 @@ type ResetSessionConfirm2 struct {
 func (t TUI) commandReset() (TUI, tea.Cmd, bool) {
 	sid := strings.TrimSpace(t.currentSessionID)
 	if sid == "" {
-		return t, tea.Println(hintStyle.Render("no active session") + "\n"), true
+		return t, tea.Println(msgLog("no active session") + "\n"), true
 	}
 
 	label := utils.ShortenSessionID(sid)
 	t.popup = &Popup{
 		kind:     popupSingleSelect,
 		title:    fmt.Sprintf("Reset history for %s ?", label),
-		subtitle: "summary: regenerate then keep · all: also wipe the summary",
+		subtitle: "summary: regenerate then keep  all: also wipe the summary",
 		options:  []string{"No", "Yes  summary first, keep it", "Yes  reset all (summary too)"},
 		values:   []string{"no", "summary", "all"},
 		cursor:   0,
@@ -82,7 +82,7 @@ func (t TUI) runResetSession(sid, mode string) (TUI, tea.Cmd) {
 	if mode == "all" {
 		t.activity = "resetting (history + summary)..."
 		return t, tea.Batch(
-			tea.Println(hintStyle.Render(fmt.Sprintf("⎯ clearing history and summary for %s...", label))+"\n"),
+			tea.Println(msgLog(fmt.Sprintf("clearing history and summary for %s...", label))+"\n"),
 			t.spinner.Tick,
 			func() tea.Msg {
 				keys, err := exec.ResetSessionAll(sid)
@@ -93,7 +93,7 @@ func (t TUI) runResetSession(sid, mode string) (TUI, tea.Cmd) {
 
 	t.activity = "resetting (summary refresh first)..."
 	return t, tea.Batch(
-		tea.Println(hintStyle.Render(fmt.Sprintf("⎯ refreshing summary for %s, then clearing history...", label))+"\n"),
+		tea.Println(msgLog(fmt.Sprintf("refreshing summary for %s, then clearing history...", label))+"\n"),
 		t.spinner.Tick,
 		func() tea.Msg {
 			ctx := context.Background()
@@ -109,7 +109,7 @@ func (t TUI) finishResetSession(msg ResetSessionDone) (TUI, tea.Cmd) {
 	t.runTarget = ""
 
 	if msg.err != nil {
-		return t, tea.Println(errorStyle.Render(fmt.Sprintf("[!] reset failed: %v", msg.err)) + "\n")
+		return t, tea.Println(msgError(fmt.Sprintf("reset failed: %v", msg.err)) + "\n")
 	}
 
 	t.tokens = 0
@@ -126,7 +126,7 @@ func (t TUI) finishResetSession(msg ResetSessionDone) (TUI, tea.Cmd) {
 	seq := []tea.Cmd{
 		tea.ClearScreen,
 		tea.Println(headerBlock(t.daemonStatus, t.httpStatus, t.discordStatus, t.telegramStatus, t.lineStatus)),
-		tea.Println(hintStyle.Render(fmt.Sprintf("⎯ reset: %s (%s, %d torii keys purged)", utils.ShortenSessionID(msg.id), summaryNote, msg.keys)) + "\n"),
+		tea.Println(msgLog(fmt.Sprintf("reset: %s (%s, %d torii keys purged)", utils.ShortenSessionID(msg.id), summaryNote, msg.keys)) + "\n"),
 	}
 	return t, tea.Sequence(seq...)
 }

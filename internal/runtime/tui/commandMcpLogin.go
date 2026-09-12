@@ -48,7 +48,7 @@ func (t TUI) openMcpClientID(server string) (TUI, tea.Cmd) {
 	t.mcpClient = &mcpClientDraft{server: server}
 	t.popup = &Popup{
 		kind:     popupText,
-		title:    fmt.Sprintf("%s · OAuth client ID", server),
+		title:    fmt.Sprintf("%s  OAuth client ID", server),
 		subtitle: "from the provider console; register " + mcp.DefaultRedirectURI + " as its redirect URI",
 		input:    newPopupInput("", false),
 		onConfirm: func(value string) any {
@@ -88,13 +88,13 @@ func (t TUI) runMcpClientSave(redirectURI string) (TUI, tea.Cmd) {
 	draft := t.mcpClient
 	t.mcpClient = nil
 	if draft == nil {
-		return t, tea.Println(errorStyle.Render("[!] mcp client state lost") + "\n")
+		return t, tea.Println(msgError("mcp client state lost") + "\n")
 	}
 	if err := mcp.ClearOAuth(draft.server); err != nil {
-		return t, tea.Println(errorStyle.Render(fmt.Sprintf("[!] mcp.ClearOAuth: %v", err)) + "\n")
+		return t, tea.Println(msgError(fmt.Sprintf("mcp.ClearOAuth: %v", err)) + "\n")
 	}
 	if err := mcp.SaveOAuthClient(draft.server, draft.id, draft.secret, redirectURI); err != nil {
-		return t, tea.Println(errorStyle.Render(fmt.Sprintf("[!] mcp.SaveOAuthClient: %v", err)) + "\n")
+		return t, tea.Println(msgError(fmt.Sprintf("mcp.SaveOAuthClient: %v", err)) + "\n")
 	}
 	return t.startMcpLogin(draft.server)
 }
@@ -109,7 +109,7 @@ func (t TUI) startMcpLogin(name string) (TUI, tea.Cmd) {
 	}
 	t.popup = &Popup{
 		kind:     popupOAuth,
-		title:    fmt.Sprintf("%s OAuth · discovering authorization server...", name),
+		title:    fmt.Sprintf("%s OAuth  discovering authorization server...", name),
 		subtitle: "browser will open automatically once the URL is ready",
 		oauth:    t.mcpOAuth,
 	}
@@ -127,7 +127,7 @@ func (t TUI) startMcpLogin(name string) (TUI, tea.Cmd) {
 func (t TUI) openMcpOAuthPaste(state *oauthState) (tea.Model, tea.Cmd) {
 	t.popup = &Popup{
 		kind:     popupText,
-		title:    fmt.Sprintf("%s OAuth · paste the redirect URL", state.mcpServer),
+		title:    fmt.Sprintf("%s OAuth  paste the redirect URL", state.mcpServer),
 		subtitle: "for browsers that cannot reach this machine's loopback listener",
 		input:    newPopupInput("", false),
 		oauth:    state,
@@ -145,12 +145,12 @@ func (t TUI) runMcpOAuthPaste(msg McpOAuthPaste) (TUI, tea.Cmd) {
 	}
 	t.popup = &Popup{
 		kind:     popupOAuth,
-		title:    fmt.Sprintf("%s OAuth · waiting for authorization...", msg.server),
+		title:    fmt.Sprintf("%s OAuth  waiting for authorization...", msg.server),
 		subtitle: "",
 		oauth:    state,
 	}
 	if err := mcp.SubmitCallback(msg.server, msg.url); err != nil {
-		return t, tea.Println(errorStyle.Render(fmt.Sprintf("[!] %s oauth paste: %v", msg.server, err)) + "\n")
+		return t, tea.Println(msgError(fmt.Sprintf("%s oauth paste: %v", msg.server, err)) + "\n")
 	}
 	return t, nil
 }
@@ -160,7 +160,7 @@ func (t TUI) runMcpOAuthInfo(msg McpOAuthInfo) (TUI, tea.Cmd) {
 		return t, nil
 	}
 	t.popup.oauth.url = msg.url
-	t.popup.title = fmt.Sprintf("%s OAuth · open browser to authorize", t.popup.oauth.provider)
+	t.popup.title = fmt.Sprintf("%s OAuth  open browser to authorize", t.popup.oauth.provider)
 	t.popup.subtitle = ""
 	if msg.url != "" {
 		openBrowser(msg.url)
@@ -174,11 +174,11 @@ func (t TUI) runMcpOAuthDone(msg McpOAuthDone) (TUI, tea.Cmd) {
 	switch {
 	case msg.err == nil:
 		next, cmd := t.reconnectMcpServer(msg.name)
-		return next, tea.Batch(tea.Println(hintStyle.Render(fmt.Sprintf("⎯ %s · oauth authorized", msg.name))), cmd)
+		return next, tea.Batch(tea.Println(msgLog(fmt.Sprintf("%s  oauth authorized", msg.name))), cmd)
 	case errors.Is(msg.err, context.Canceled):
 		return t, nil
 	case errors.Is(msg.err, context.DeadlineExceeded):
-		return t, tea.Println(warnStyle.Render("⎯ oauth timed out") + "\n")
+		return t, tea.Println(msgWarn("oauth timed out") + "\n")
 	}
-	return t, tea.Println(errorStyle.Render(fmt.Sprintf("[!] %s oauth: %v", msg.name, msg.err)) + "\n")
+	return t, tea.Println(msgError(fmt.Sprintf("%s oauth: %v", msg.name, msg.err)) + "\n")
 }

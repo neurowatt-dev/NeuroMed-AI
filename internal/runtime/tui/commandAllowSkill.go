@@ -34,7 +34,7 @@ func (t TUI) commandAllowSkill(parts []string) (TUI, tea.Cmd, bool) {
 
 	t.popup = &Popup{
 		kind:    popupSingleSelect,
-		title:   "Allow skill · scope",
+		title:   "Allow skill  scope",
 		options: []string{"global   " + hintStyle.Render("~/.config/agenvoy/allow_skill"), "project  " + hintStyle.Render(".agenvoy/allow_skill")},
 		values:  []string{"global", "project"},
 		onConfirm: func(chosen string) any {
@@ -47,12 +47,12 @@ func (t TUI) commandAllowSkill(parts []string) (TUI, tea.Cmd, bool) {
 func (t TUI) openAllowSkillPickerPopup(scope string) (TUI, tea.Cmd) {
 	scanner := agents.Scanner()
 	if scanner == nil {
-		return t, tea.Println(errorStyle.Render("[!] skill scanner unavailable") + "\n")
+		return t, tea.Println(msgError("skill scanner unavailable") + "\n")
 	}
 
 	names := scanner.List()
 	if len(names) == 0 {
-		return t, tea.Println(hintStyle.Render("⎯ no skills available") + "\n")
+		return t, tea.Println(msgLog("no skills available") + "\n")
 	}
 
 	var current map[string]bool
@@ -62,7 +62,7 @@ func (t TUI) openAllowSkillPickerPopup(scope string) (TUI, tea.Cmd) {
 	case "project":
 		current = allowSkill.LoadEffective(t.cwd)
 	default:
-		return t, tea.Println(errorStyle.Render(fmt.Sprintf("[!] unknown scope: %s", scope)) + "\n")
+		return t, tea.Println(msgError(fmt.Sprintf("unknown scope: %s", scope)) + "\n")
 	}
 
 	sort.Strings(names)
@@ -77,7 +77,7 @@ func (t TUI) openAllowSkillPickerPopup(scope string) (TUI, tea.Cmd) {
 		values[i] = name
 	}
 
-	title := "Allow skill · " + scope
+	title := "Allow skill  " + scope
 	if scope == "project" {
 		title += "  " + hintStyle.Render("(✓ includes global)")
 	}
@@ -106,14 +106,14 @@ func (t TUI) runAllowSkillToggle(scope, name string) (TUI, tea.Cmd) {
 		added, err = allowSkill.ToggleProject(t.cwd, name)
 		pathLabel = filesystem.AllowSkillProjectPath(t.cwd)
 	default:
-		return t, tea.Println(errorStyle.Render(fmt.Sprintf("[!] unknown scope: %s", scope)) + "\n")
+		return t, tea.Println(msgError(fmt.Sprintf("unknown scope: %s", scope)) + "\n")
 	}
 	if err != nil {
-		return t, tea.Println(errorStyle.Render(fmt.Sprintf("[!] allow-skill: %v", err)) + "\n")
+		return t, tea.Println(msgError(fmt.Sprintf("allow-skill: %v", err)) + "\n")
 	}
 	verb := "removed"
 	if added {
 		verb = "added"
 	}
-	return t, tea.Println(hintStyle.Render(fmt.Sprintf("⎯ allow_skill %s: %s (%s) · %s", verb, name, scope, pathLabel)) + "\n")
+	return t, tea.Println(msgLog(fmt.Sprintf("allow_skill %s: %s (%s)  %s", verb, name, scope, pathLabel)) + "\n")
 }

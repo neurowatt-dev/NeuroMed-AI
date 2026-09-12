@@ -39,7 +39,7 @@ type BotSaved struct {
 func (t TUI) commandBot(parts []string) (TUI, tea.Cmd, bool) {
 	sid := strings.TrimSpace(t.currentSessionID)
 	if sid == "" {
-		return t, tea.Println(errorStyle.Render("[!] no current session") + "\n"), true
+		return t, tea.Println(msgError("no current session") + "\n"), true
 	}
 
 	if len(parts) >= 3 {
@@ -68,20 +68,20 @@ func (t TUI) commandBot(parts []string) (TUI, tea.Cmd, bool) {
 
 func (t TUI) botCheckConflict(sid, name string) (tea.Cmd, bool) {
 	if name == "" {
-		return tea.Println(errorStyle.Render("[!] bot name required") + "\n"), false
+		return tea.Println(msgError("bot name required") + "\n"), false
 	}
 	if owner := session.GetSessionID(name); owner != "" && owner != sid {
-		return tea.Println(errorStyle.Render(fmt.Sprintf("[!] bot name %q already used by session %s", name, owner)) + "\n"), false
+		return tea.Println(msgError(fmt.Sprintf("bot name %q already used by session %s", name, owner)) + "\n"), false
 	}
 	return nil, true
 }
 
 func (t TUI) botCheckSelfID(sid, selfID string) (tea.Cmd, bool) {
 	if err := historyStore.ValidSelfID(selfID); err != nil {
-		return tea.Println(errorStyle.Render("[!] "+err.Error()) + "\n"), false
+		return tea.Println(msgError(""+err.Error()) + "\n"), false
 	}
 	if owner := session.GetSessionIDBySelfID(selfID); owner != "" && owner != sid {
-		return tea.Println(errorStyle.Render(fmt.Sprintf("[!] self id %q already used by session %s", selfID, owner)) + "\n"), false
+		return tea.Println(msgError(fmt.Sprintf("self id %q already used by session %s", selfID, owner)) + "\n"), false
 	}
 	return nil, true
 }

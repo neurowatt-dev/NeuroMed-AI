@@ -88,13 +88,13 @@ func (t TUI) showNewCustomPopup(name string) (TUI, tea.Cmd) {
 func (t TUI) runCreateSession(name, body string) (TUI, tea.Cmd) {
 	if name != "" {
 		if owner := session.GetSessionID(name); owner != "" {
-			return t, tea.Println(errorStyle.Render(fmt.Sprintf("[!] name %q already used by session %s", name, owner)) + "\n")
+			return t, tea.Println(msgError(fmt.Sprintf("name %q already used by session %s", name, owner)) + "\n")
 		}
 	}
 
 	id, err := session.New("cli-")
 	if err != nil {
-		return t, tea.Println(errorStyle.Render(fmt.Sprintf("[!] create session failed: %v", err)) + "\n")
+		return t, tea.Println(msgError(fmt.Sprintf("create session failed: %v", err)) + "\n")
 	}
 
 	if name != "" || body != "" {
@@ -121,7 +121,7 @@ func (t TUI) runCreateSession(name, body string) (TUI, tea.Cmd) {
 	if name != "" {
 		label = fmt.Sprintf("%s (%s)", name, label)
 	}
-	lines := []string{hintStyle.Render(fmt.Sprintf("⎯ new session: %s", label))}
+	lines := []string{msgLog(fmt.Sprintf("new session: %s", label))}
 	if previous != "" && previous != id {
 		lines = append(lines, hintStyle.Render(fmt.Sprintf("  previous: %s", utils.ShortenSessionID(previous))))
 	}

@@ -9,6 +9,7 @@ set -euo pipefail
 REPO_URL="https://github.com/neurowatt-dev/NeuroMed-AI.git"
 BRANCH="linebot"
 INSTALL_URL="https://raw.githubusercontent.com/neurowatt-dev/NeuroMed-AI/linebot/static/scripts/install.sh"
+BIN_DIR="/usr/local/bin"
 GO_INSTALL_DIR="${HOME}/.local/go"
 REQUIRED_GO_MAJOR=1
 REQUIRED_GO_MINOR=26
@@ -462,7 +463,7 @@ ensure_sudo() {
     return 0
   fi
   if have_tty; then
-    warn "Need sudo for temporary swap (and /usr/local/bin install)"
+    warn "Need sudo for temporary swap (and ${BIN_DIR} install)"
     # -v refreshes timestamp; talk to the real terminal even if stdin is a pipe
     if sudo -v </dev/tty >/dev/tty 2>/dev/tty; then
       return 0
@@ -823,18 +824,18 @@ verify_path_resolution() {
   local resolved
   resolved="$(command -v agen 2>/dev/null || true)"
   if [ -z "$resolved" ]; then
-    warn "/usr/local/bin is not on PATH; run /usr/local/bin/agen directly or add it to PATH"
-  elif [ "$resolved" != "/usr/local/bin/agen" ]; then
-    warn "Another agen shadows the new install: $resolved (new binary is at /usr/local/bin/agen)"
+    warn "${BIN_DIR} is not on PATH; run ${BIN_DIR}/agen directly or add it to PATH"
+  elif [ "$resolved" != "${BIN_DIR}/agen" ]; then
+    warn "Another agen shadows the new install: $resolved (new binary is at ${BIN_DIR}/agen)"
   fi
 }
 
 build_and_install() {
   configure_build_env
   if [ "${LOW_MEM:-0}" -eq 1 ]; then
-    log "Building with low-memory staged pipeline (sudo may prompt for /usr/local/bin)"
+    log "Building with low-memory staged pipeline (sudo may prompt for ${BIN_DIR})"
   else
-    log "Building (sudo prompt expected for /usr/local/bin install)"
+    log "Building (sudo prompt expected for ${BIN_DIR} install)"
   fi
 
   local build_log
@@ -869,14 +870,14 @@ build_and_install() {
   fi
   rm -f "$build_log"
 
-  [ -x /usr/local/bin/agen ] || die "Build reported success but /usr/local/bin/agen is missing"
+  [ -x "${BIN_DIR}/agen" ] || die "Build reported success but ${BIN_DIR}/agen is missing"
   verify_path_resolution
-  ok "agen installed at /usr/local/bin/agen"
+  ok "agen installed at ${BIN_DIR}/agen"
 }
 
 stop_daemon() {
   log "Stopping existing daemon (if any) so the new binary takes effect"
-  /usr/local/bin/agen stop || true
+  "${BIN_DIR}/agen" stop || true
 }
 
 print_done() {
@@ -916,19 +917,7 @@ print_done() {
   printf '%s╰%s╯%s\n\n' "$C_GRN" "$border" "$C_RST"
 }
 
-main() {
-  log "NeuroMed-AI installer (linebot branch)"
-  local platform; platform="$(detect_platform)"
-  log "Platform: $platform"
-
-  confirm_overwrite_agen
-
-  require_cmd curl
-  require_cmd uname
-
-  ensure_cgo_enabled
-  ensure_homebrew_darwin
-  detect_pkg_mgr
+install_dependencies() {
   ensure_cmd tar
   ensure_cmd git
   ensure_cmd make
@@ -948,12 +937,35 @@ main() {
     ensure_cmd secret-tool libsecret
   fi
   ensure_chrome_deps
+}
+
+main() {
+  log "NeuroMed-AI installer (linebot branch)"
+
+  require_cmd uname
+  require_cmd curl
+
+  local platform; platform="$(detect_platform)"
+  log "Platform: $platform"
+
+  confirm_overwrite_agen
+
+  ensure_cgo_enabled
+  ensure_homebrew_darwin
+  detect_pkg_mgr
+  install_dependencies
 
   ensure_go "$platform"
   clone_repo
   build_and_install
   stop_daemon
   print_done "${BRANCH}@${INSTALLED_REV}"
+
+  cleanup
+  trap - EXIT INT TERM
+
+  sleep 2
+  exec "${BIN_DIR}/agen"
 }
 
 main "$@"

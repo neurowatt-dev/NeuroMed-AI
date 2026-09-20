@@ -27,7 +27,7 @@
       <!---->
       <header>
         <img src="public/logo-min.svg" alt="Logo" />
-        <p>NeuroTeam</p>
+        <a href="https://github.com/neurowatt-dev/NeuroMed-AI" target="_blank" rel="noreferrer">NeuroTeam</a>
         <button type="button" @click="show_tab">
           <span class="material-symbols-outlined"> right_panel_close </span>
         </button>
@@ -655,6 +655,7 @@
               <div class="label">
                 <strong>Output Dir</strong>
                 <p>where generated files land</p>
+                <a id="system-output-open" @click="system_output_open">open dir</a>
               </div>
               <div class="row">
                 <input id="system-output" type="text" placeholder="~/Downloads" @keydown="system_output_keydown" />
@@ -665,8 +666,10 @@
               <div class="label">
                 <strong>Update</strong>
                 <p>opens a terminal to install the latest release</p>
+                <a href="https://github.com/agenvoy/Agenvoy/releases" target="_blank" rel="noreferrer">release notes</a>
               </div>
               <div class="row">
+                <div></div>
                 <button id="system-update" type="button" class="submit" @click="system_update">update</button>
               </div>
             </div>

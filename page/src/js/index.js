@@ -310,6 +310,9 @@ document.addEventListener("DOMContentLoaded", async function () {
       system_update: function () {
         runSystemUpdate();
       },
+      system_output_open: function () {
+        openOutputDir();
+      },
       system_output_keydown: function (e) {
         if (e.key === "Enter") {
           e.preventDefault();
@@ -350,7 +353,6 @@ document.addEventListener("DOMContentLoaded", async function () {
         bindSelectPicker();
         bindFileLink();
         bindInputDrop();
-        bindChatMenu();
         renderChatList();
 
         if (params.page === "chat") {

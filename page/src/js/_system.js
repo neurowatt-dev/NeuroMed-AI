@@ -78,41 +78,6 @@ async function renderSystem() {
 
 }
 
-async function outputDirConfig() {
-  try {
-    const response = await fetch(`${API}/v1/config/output_dir`);
-    if (response.ok) {
-      return (await response.json()) || {};
-    }
-  } catch (err) {
-    console.error("outputDirConfig", err);
-  }
-  return {};
-}
-
-async function saveSystemOutput() {
-  const input = $("#system-output");
-  if (!input) {
-    return;
-  }
-
-  try {
-    const response = await fetch(`${API}/v1/config/output_dir`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ output_dir: input.value.trim() }),
-    });
-    if (!response.ok) {
-      const detail = await response.json().catch(() => ({}));
-      alert(detail.error || `HTTP ${response.status}`);
-    }
-  } catch (err) {
-    console.error("saveSystemOutput", err);
-    alert(err.message || "failed");
-  }
-  renderSystem();
-}
-
 async function runSystemUpdate() {
   if (!confirm("Install the latest release?\nThis overwrites the installed binary.")) {
     return;
@@ -141,6 +106,60 @@ async function runSystemUpdate() {
   if (button) {
     button.disabled = false;
   }
+}
+
+async function outputDirConfig() {
+  try {
+    const response = await fetch(`${API}/v1/config/output_dir`);
+    if (response.ok) {
+      return (await response.json()) || {};
+    }
+  } catch (err) {
+    console.error("outputDirConfig", err);
+  }
+  return {};
+}
+
+async function openOutputDir() {
+  const dir = await outputDirConfig();
+  const path = (dir.resolved || dir.output_dir || "").trim();
+  if (!path) {
+    return;
+  }
+
+  try {
+    const response = await fetch(`${API}/v1/file/open?path=${encodeURIComponent(path)}`);
+    if (!response.ok) {
+      const detail = await response.json().catch(() => ({}));
+      alert(detail.error || `HTTP ${response.status}`);
+    }
+  } catch (err) {
+    console.error("openOutputDir", err);
+    alert(err.message || "failed");
+  }
+}
+
+async function saveSystemOutput() {
+  const input = $("#system-output");
+  if (!input) {
+    return;
+  }
+
+  try {
+    const response = await fetch(`${API}/v1/config/output_dir`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ output_dir: input.value.trim() }),
+    });
+    if (!response.ok) {
+      const detail = await response.json().catch(() => ({}));
+      alert(detail.error || `HTTP ${response.status}`);
+    }
+  } catch (err) {
+    console.error("saveSystemOutput", err);
+    alert(err.message || "failed");
+  }
+  renderSystem();
 }
 
 async function saveSystemLang() {

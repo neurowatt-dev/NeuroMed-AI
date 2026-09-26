@@ -17,14 +17,18 @@ import (
 	"github.com/pardnchiu/agenvoy/configs"
 	"github.com/pardnchiu/agenvoy/internal/filesystem"
 	"github.com/pardnchiu/agenvoy/internal/filesystem/skill"
-	"github.com/pardnchiu/agenvoy/internal/note"
 	"github.com/pardnchiu/agenvoy/internal/runtime"
 	"github.com/pardnchiu/agenvoy/internal/runtime/mcp"
 	configBot "github.com/pardnchiu/agenvoy/internal/session/config/bot"
 	toolRegister "github.com/pardnchiu/agenvoy/internal/tools/register"
 )
 
-const skillsHeader = "## Skills\n\n**`/<name>` = STRICT EXECUTION** — every SKILL.md step binding, tool calls required. Batch independent read-only steps same response; serialize only when a step needs an earlier result. FIRST step (often `ask_user`) before any other tool call — no skip-ahead even if input looks complete.\n\n`run_skill` path = advisory — consult, integrate fitting parts, ignore rest. Activate matching skill by intent even without explicit `/<name>`.\n\n"
+const (
+	skillsHeader      = "## Skills\n\n**`/<name>` = STRICT EXECUTION** — the whole procedure binds, and its rules arrive with it. `run_skill` path = advisory — consult, integrate fitting parts, ignore rest. Activate matching skill by intent even without explicit `/<name>`.\n\n"
+	baseGuideKey      = "_base"
+	unlistedGuideKey  = "_base_unlisted"
+	vendorGuidePrefix = "_vendor_"
+)
 
 var guardrailRules = loadGuardrailRules()
 
@@ -127,19 +131,11 @@ func getSystemPrompt(workDir string, extraSystemPrompt string, scanner *runtime.
 		"{{.BotPersona}}", personaSection,
 		"{{.PermissionMode}}", buildPermissionModeSection(allowAll),
 		"{{.AvailableSkills}}", skillsSection,
-		"{{.AvailableNote}}", noteSection(),
 		"{{.OfficialGuide}}", officialGuideSection(model),
 		"{{.GuardrailRules}}", guardrailRules,
 		"{{.AgentGuide}}", agentGuideSection(workDir),
 		"{{.ExtraSystemPrompt}}", extraSection,
 	).Replace(template)
-}
-
-func noteSection() string {
-	if len(note.List()) == 0 {
-		return ""
-	}
-	return "\n## Note\n\nThe operator keeps notes in this workspace and they outrank anything else you find: every non-smalltalk request fires `find_note` with its key terms before you answer — in the same response as any RAG or web lookup, never in place of one — then whichever names look relevant are pulled in full with `mode=read`, those calls issued together. Answering from RAG, the web or memory without that call, or presenting a RAG/web file as one of these notes, is a failed turn.\n"
 }
 
 func agentGuideSection(workDir string) string {
@@ -164,16 +160,91 @@ func agentGuideSection(workDir string) string {
 	return ""
 }
 
+func guideKeyMatches(model, key string) bool {
+	if strings.Contains(model, key) {
+		return true
+	}
+	if !strings.HasPrefix(key, "claude") {
+		return false
+	}
+	return strings.Contains(strings.ReplaceAll(model, ".", "-"), strings.ReplaceAll(key, ".", "-"))
+}
+
 func officialGuideSection(model string) string {
+	matched, vendor := "", ""
+
 	keys := slices.SortedFunc(maps.Keys(configs.OfficialGuides), func(a, b string) int {
 		return len(b) - len(a)
 	})
 	for _, key := range keys {
-		if strings.Contains(model, key) {
-			return strings.TrimSpace(configs.OfficialGuides[key])
+		if vendorKey, ok := strings.CutPrefix(key, vendorGuidePrefix); ok {
+			if vendor == "" && guideKeyMatches(model, vendorKey) {
+				vendor = key
+			}
+			continue
+		}
+		if key == baseGuideKey || key == unlistedGuideKey {
+			continue
+		}
+		if matched == "" && guideKeyMatches(model, key) {
+			matched = key
 		}
 	}
-	return ""
+	if matched == "" && vendor == "" {
+		matched = unlistedGuideKey
+	}
+
+	return mergeGuideSections(
+		configs.OfficialGuides[baseGuideKey],
+		configs.OfficialGuides[vendor],
+		configs.OfficialGuides[matched],
+	)
+}
+
+func mergeGuideSections(layers ...string) string {
+	order := []string{}
+	dicItems := map[string][]string{}
+	dicSeen := map[string]map[string]bool{}
+
+	for _, layer := range layers {
+		heading := ""
+		for line := range strings.SplitSeq(layer, "\n") {
+			if title, ok := strings.CutPrefix(line, "## "); ok {
+				heading = strings.TrimSpace(title)
+				if _, ok := dicItems[heading]; !ok {
+					order = append(order, heading)
+					dicItems[heading] = nil
+					dicSeen[heading] = map[string]bool{}
+				}
+				continue
+			}
+			if line = strings.TrimSpace(line); line == "" || heading == "" || dicSeen[heading][line] {
+				continue
+			}
+			dicSeen[heading][line] = true
+			dicItems[heading] = append(dicItems[heading], line)
+		}
+	}
+
+	builder := strings.Builder{}
+	for _, heading := range order {
+		if len(dicItems[heading]) == 0 {
+			continue
+		}
+		if builder.Len() > 0 {
+			builder.WriteString("\n\n")
+		}
+		builder.WriteString("## ")
+		builder.WriteString(heading)
+		builder.WriteString("\n\n")
+		for i, item := range dicItems[heading] {
+			if i > 0 {
+				builder.WriteByte('\n')
+			}
+			builder.WriteString(item)
+		}
+	}
+	return builder.String()
 }
 
 func buildPermissionModeSection(allowAll bool) string {
@@ -195,7 +266,6 @@ func getChatCompletionsSystemPrompt(workDir string, scanner *runtime.SkillScanne
 		"{{.HostNote}}", hostNoteSection(),
 		"{{.ReplyLanguage}}", filesystem.ReplyLangDirective(),
 		"{{.AvailableSkills}}", skillsSection,
-		"{{.AvailableNote}}", noteSection(),
 		"{{.OfficialGuide}}", officialGuideSection(model),
 		"{{.GuardrailRules}}", guardrailRules,
 	).Replace(filesystem.ApplyReplyLang(configs.ChatCompletionsSystemPrompt))

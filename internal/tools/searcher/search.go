@@ -26,28 +26,16 @@ func searchTools(e *toolTypes.Executor, query string) (string, error) {
 		matches = matchKeyword(query, e.AllTools)
 	}
 
-	toolDic := make(map[string]provider.Tool, len(e.AllTools))
-	for _, tool := range e.AllTools {
-		toolDic[tool.Function.Name] = tool
-	}
-
 	e.ToolsMu.Lock()
+	delivered := matches[:0]
 	for _, match := range matches {
 		if e.ExcludeTools[match.Name] {
 			continue
 		}
-
-		full, ok := toolDic[match.Name]
-		if !ok {
-			continue
-		}
-
-		if i := slices.IndexFunc(e.Tools, func(t provider.Tool) bool { return t.Function.Name == match.Name }); i != -1 {
-			e.Tools = slices.Delete(e.Tools, i, i+1)
-		}
-		e.Tools = append(e.Tools, full)
 		delete(e.StubTools, match.Name)
+		delivered = append(delivered, match)
 	}
+	matches = delivered
 	e.ToolsMu.Unlock()
 
 	raw, err := json.Marshal(ToolMatch{
@@ -79,6 +67,7 @@ func matchName(names string, tools []provider.Tool) []Tool {
 			list = append(list, Tool{
 				Name:          tool.Function.Name,
 				Description:   tool.Function.Description,
+				Parameters:    tool.Function.Parameters,
 				SystemDefault: strings.HasPrefix(strings.TrimSpace(tool.Function.Description), systemDefaultMarker),
 			})
 		}
@@ -197,6 +186,7 @@ func matchKeyword(query string, tools []provider.Tool) []Tool {
 		list = append(list, Tool{
 			Name:          candidate.tool.Function.Name,
 			Description:   candidate.tool.Function.Description,
+			Parameters:    candidate.tool.Function.Parameters,
 			SystemDefault: strings.HasPrefix(strings.TrimSpace(candidate.tool.Function.Description), systemDefaultMarker),
 		})
 	}

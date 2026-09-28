@@ -220,11 +220,23 @@ func stripSafeGitGlobalFlags(argv []string) []string {
 	return append([]string{argv[0]}, argv[i:]...)
 }
 
+func readOnlyCandidates(bin string, argv []string) []string {
+	list := make([]string, 0, 3)
+	if len(argv) > 2 {
+		list = append(list, bin+" "+argv[1]+" "+argv[2])
+	}
+	if len(argv) > 1 {
+		list = append(list, bin+" "+argv[1])
+	}
+	return append(list, bin)
+}
+
 func isReadOnlyRunCommand(toolArgs string) bool {
 	var p struct {
-		Argv []string `json:"argv"`
+		Argv    []string `json:"argv"`
+		Network bool     `json:"network"`
 	}
-	if json.Unmarshal([]byte(toolArgs), &p) != nil || len(p.Argv) == 0 {
+	if json.Unmarshal([]byte(toolArgs), &p) != nil || len(p.Argv) == 0 || p.Network {
 		return false
 	}
 	argv := p.Argv
@@ -233,11 +245,17 @@ func isReadOnlyRunCommand(toolArgs string) bool {
 		argv = stripSafeGitGlobalFlags(argv)
 	}
 
-	matched := slices.Contains(filesystem.ReadOnlyCommand, bin)
-	if !matched && len(argv) > 1 {
-		matched = slices.Contains(filesystem.ReadOnlyCommand, bin+" "+argv[1])
+	matched := false
+	for _, candidate := range readOnlyCandidates(bin, argv) {
+		if slices.Contains(filesystem.ReadOnlyCommand, candidate) {
+			matched = true
+			break
+		}
 	}
 	if !matched {
+		return false
+	}
+	if slices.ContainsFunc(argv[1:], boundary.IsSensitivePath) {
 		return false
 	}
 	if bin == "git" {
@@ -295,9 +313,8 @@ func truncateWriteArgs(argsJSON string) string {
 }
 
 var checkpointClearableTool = map[string]bool{
-	"find_files":           true,
-	"run_command":          true,
-	"run_command_readonly": true,
+	"find_files":  true,
+	"run_command": true,
 }
 
 func hasCompletedTodo(argsJSON string) bool {
@@ -426,18 +443,21 @@ func toolCall(ctx context.Context, exec *toolTypes.Executor, choice provider.Out
 		}
 
 		if exec.StubTools[toolName] || activatedInBatch[toolName] {
+			schema := ""
 			if exec.StubTools[toolName] {
 				activateArgs, _ := json.Marshal(map[string]any{"mode": "search", "query": "select:" + toolName})
-				if _, err := toolRegister.Dispatch(ctx, exec, "find_tools", activateArgs); err != nil {
+				out, err := toolRegister.Dispatch(ctx, exec, "find_tools", activateArgs)
+				if err != nil {
 					slog.Warn("stub tool activation failed",
 						slog.String("name", toolName),
 						slog.String("error", err.Error()))
 				}
+				schema = out
 				delete(exec.StubTools, toolName)
 			}
 			activatedInBatch[toolName] = true
 			slots[i].state = slotStubActivated
-			slots[i].preMsg = fmt.Sprintf("[%s] tool schema just loaded. Re-invoke %s with the correct arguments — the previous call was made against a stub with empty params.", toolName, toolName)
+			slots[i].preMsg = fmt.Sprintf("[%s] tool schema below. Re-invoke %s with the correct arguments — the previous call was made against a stub with empty params.\n%s", toolName, toolName, schema)
 			continue
 		}
 

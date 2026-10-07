@@ -101,11 +101,15 @@ func (t TUI) runRemoveSessionConfirm(msg RemoveSessionConfirm) (TUI, tea.Cmd) {
 		t.activity = ""
 	}
 
-	next, _, _ := t.commandSessions(nil)
-	return next, tea.Sequence(
+	slog.Debug("sessions removed", slog.String("sessions", strings.Join(removed, ", ")))
+	if !removedCurrent {
+		next, _, _ := t.commandSessions(nil)
+		return next, nil
+	}
+	return t, tea.Sequence(
 		tea.ClearScreen,
 		tea.Println(headerBlock(t.daemonStatus, t.httpStatus, t.discordStatus, t.telegramStatus, t.lineStatus, t.currentSessionID)),
-		notice(msgLog(fmt.Sprintf("removed: %s", strings.Join(removed, ", ")))+"\n"),
+		func() tea.Msg { return RemoveSessionConfirm{} },
 	)
 }
 

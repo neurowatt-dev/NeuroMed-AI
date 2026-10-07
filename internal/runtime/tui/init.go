@@ -47,6 +47,7 @@ type TUI struct {
 
 	popup         *Popup
 	popupQueue    []Pending
+	eventQueue    []agentTypes.Event
 	popupOrigin   *Popup
 	botBodyDraft  string
 	roleBodyDraft string
@@ -99,6 +100,8 @@ type TUI struct {
 	inputHistoryIdx int
 
 	quitting bool
+
+	popupOnScreen bool
 
 	allowAll bool
 }

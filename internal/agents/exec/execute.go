@@ -13,13 +13,14 @@ import (
 
 	go_pkg_keychain "github.com/pardnchiu/go-pkg/filesystem/keychain"
 
+	"github.com/pardnchiu/agenvoy/configs"
 	"github.com/pardnchiu/agenvoy/internal/agents"
+	"github.com/pardnchiu/agenvoy/internal/agents/claudeCode"
 	allowSkill "github.com/pardnchiu/agenvoy/internal/agents/exec/allow/skill"
 	"github.com/pardnchiu/agenvoy/internal/agents/exec/compact"
 	"github.com/pardnchiu/agenvoy/internal/agents/exec/fast"
 	"github.com/pardnchiu/agenvoy/internal/agents/exec/retryHandler"
 	agentTypes "github.com/pardnchiu/agenvoy/internal/agents/types"
-	"github.com/pardnchiu/agenvoy/internal/filesystem"
 	"github.com/pardnchiu/agenvoy/internal/filesystem/skill"
 	"github.com/pardnchiu/agenvoy/internal/runtime"
 	historyStore "github.com/pardnchiu/agenvoy/internal/runtime/store"
@@ -70,13 +71,6 @@ const (
 	fanoutSendGrace = 3 * time.Second
 	fanoutStopGrace = 3 * time.Second
 )
-
-func (m ExecuteMeta) ModelName() string {
-	if m.Agent == nil {
-		return ""
-	}
-	return m.Agent.Name()
-}
 
 type (
 	allowAllCtxKey   struct{}
@@ -262,11 +256,7 @@ func Execute(ctx context.Context, data ExecuteMeta, session *agentTypes.AgentSes
 					objective = s
 				}
 			}
-			runModel := ""
-			if data.Agent != nil {
-				runModel = data.Agent.Name()
-			}
-			exec.PendingTask = interactive.CreateExecPending(session.ID, objective, data.ReplyMessageID, runModel, data.Reasoning, allowAll)
+			exec.PendingTask = interactive.CreateExecPending(session.ID, objective, data.ReplyMessageID, data.Agent.Name(), data.Reasoning, allowAll)
 		}
 		defer func() {
 			if keepPending || data.KeepPending {
@@ -349,7 +339,15 @@ func Execute(ctx context.Context, data ExecuteMeta, session *agentTypes.AgentSes
 		exec.Tools = append(exec.Tools, t)
 	}
 
-	limit := filesystem.MaxToolIterations
+	if claudeCode.Is(data.Agent.Name()) {
+		for _, t := range exec.Tools {
+			if name := t.Function.Name; name != "find_tools" && !clientTools[name] {
+				exec.StubTools[name] = true
+			}
+		}
+	}
+
+	limit := configs.MAX_TOOL_ITERATIONS
 	reasoning := resolveReasoning(session.ID, data.Reasoning)
 	reasoningLabel := reasoning.String()
 	reasoningRef.Store(&reasoningLabel)
@@ -382,6 +380,23 @@ func Execute(ctx context.Context, data ExecuteMeta, session *agentTypes.AgentSes
 
 	compact.Warm(execCtx)
 
+	compactHistory := func() {
+		compacted := false
+		if !oldHistoriesCompacted {
+			compacted = compact.ExtractOldHistories(execCtx, data.Agent, session, &usage, events)
+			oldHistoriesCompacted = true
+		}
+		if !compacted {
+			events <- agentTypes.Event{Type: agentTypes.EventCompact, Text: "tool_call"}
+			compacted = compact.ToolHistory(execCtx, data.Agent, session, &usage, exec.PendingTask)
+		}
+		if compacted {
+			lastInputTokens = 0
+		} else {
+			compactFailed = true
+		}
+	}
+
 	for range limit {
 		if execCtx.Err() != nil {
 			events <- agentTypes.Event{Type: agentTypes.EventCanceled, Model: data.Agent.Name(), Duration: time.Since(execStart)}
@@ -398,24 +413,11 @@ func Execute(ctx context.Context, data ExecuteMeta, session *agentTypes.AgentSes
 		if firstAttempt {
 			firstAttempt = false
 		} else if !compactFailed && lastInputTokens >= compact.CheckThreshold(data.Agent.Name()) {
-			compacted := false
-			if !oldHistoriesCompacted {
-				compacted = compact.ExtractOldHistories(execCtx, data.Agent, session, &usage, events)
-				oldHistoriesCompacted = true
-			}
-			if !compacted {
-				events <- agentTypes.Event{Type: agentTypes.EventCompact, Text: "tool_call"}
-				compacted = compact.ToolHistory(execCtx, data.Agent, session, &usage, exec.PendingTask)
-			}
-			if compacted {
-				lastInputTokens = 0
-			} else {
-				compactFailed = true
-			}
+			compactHistory()
 		}
 		assembled := compact.AssembleMessages(session)
 		sendStart := time.Now()
-		sendCtx, cancelSend := context.WithTimeout(execCtx, time.Duration(filesystem.AgentSendTimeoutSec)*time.Second)
+		sendCtx, cancelSend := context.WithTimeout(execCtx, time.Duration(configs.AGENT_SEND_TIMEOUT_SEC)*time.Second)
 		sendAgent := data.Agent
 		resultCh := make(chan sendOutcome, 1)
 		sendDone := make(chan struct{})
@@ -436,7 +438,7 @@ func Execute(ctx context.Context, data ExecuteMeta, session *agentTypes.AgentSes
 			}
 		}
 
-		watchdog := time.NewTimer(UnresponsiveProbeInterval)
+		watchdog := time.NewTimer(configs.UNRESPONSIVE_PROBE_INTERVAL)
 		unresponsiveFailures := 0
 		var resp *provider.Output
 		var sendCode int
@@ -459,18 +461,18 @@ func Execute(ctx context.Context, data ExecuteMeta, session *agentTypes.AgentSes
 				resp, sendCode, err, textEmitted, reasoned = out.resp, out.code, out.err, out.textEmitted, out.reasoned
 				break waitSend
 			case <-watchdog.C:
-				if checkAgentResponsive(execCtx, data.Agent, HealthCheckTimeout) {
+				if checkAgentAlive(execCtx, data.Agent, configs.HEALTH_CHECK_TIMEOUT) {
 					unresponsiveFailures = 0
-					watchdog.Reset(UnresponsiveProbeInterval)
+					watchdog.Reset(configs.UNRESPONSIVE_PROBE_INTERVAL)
 					continue
 				}
 				unresponsiveFailures++
-				if unresponsiveFailures < MaxUnresponsiveProbeFailures {
+				if unresponsiveFailures < configs.MAX_RETRY_TIMES {
 					slog.Debug("agent health probe failed, retrying",
 						slog.String("session", session.ID),
 						slog.String("name", data.Agent.Name()),
 						slog.Int("failures", unresponsiveFailures))
-					watchdog.Reset(UnresponsiveRetryInterval)
+					watchdog.Reset(configs.HEALTH_CHECK_TIMEOUT)
 					continue
 				}
 				next, nextName := nextAgent(execCtx, session.ID, data.Agent.Name(), &data.FallbackAgents, allAgents, &fallbackRound, lastInputTokens)
@@ -494,7 +496,7 @@ func Execute(ctx context.Context, data ExecuteMeta, session *agentTypes.AgentSes
 					return fmt.Errorf("agent %s unresponsive, no healthy fallback", deadName)
 				}
 				unresponsiveFailures = 0
-				watchdog.Reset(UnresponsiveProbeInterval)
+				watchdog.Reset(configs.UNRESPONSIVE_PROBE_INTERVAL)
 				slog.Debug("agent unresponsive, switching model",
 					slog.String("session", session.ID),
 					slog.String("from", data.Agent.Name()),
@@ -566,6 +568,15 @@ func Execute(ctx context.Context, data ExecuteMeta, session *agentTypes.AgentSes
 					return fmt.Errorf("data.Agent.Send context exceeded, nothing left to trim: %w", err)
 				}
 				sendFailCount++
+				if !compactFailed {
+					compactHistory()
+					if !compactFailed {
+						slog.Warn("data.Agent.Send context length exceeded, compacted history",
+							slog.String("session", session.ID),
+							slog.Int("attempts", sendFailCount))
+						continue
+					}
+				}
 				compact.TrimFallback(&session.OldHistories, &session.ToolHistories)
 				slog.Warn("data.Agent.Send context length exceeded, trimming oldest exchange",
 					slog.String("session", session.ID),
@@ -578,7 +589,7 @@ func Execute(ctx context.Context, data ExecuteMeta, session *agentTypes.AgentSes
 				slog.String("error", err.Error()),
 				slog.Bool("timeout", isTimeout))
 
-			if isTimeout && timeoutRetryCount < MaxSendTimeoutRetries-1 {
+			if isTimeout && timeoutRetryCount < configs.MAX_RETRY_TIMES {
 				timeoutRetryCount++
 				slog.Debug("data.Agent.Send timed out, retrying same model",
 					slog.String("session", session.ID),
@@ -591,7 +602,7 @@ func Execute(ctx context.Context, data ExecuteMeta, session *agentTypes.AgentSes
 						interactive.DeletePending(session.ID, exec.PendingTask)
 					}
 					return execCtx.Err()
-				case <-time.After(SendTimeoutRetryInterval):
+				case <-time.After(configs.SEND_TIMEOUT_RETRY_INTERVAL):
 				}
 				continue
 			}
@@ -699,7 +710,7 @@ func Execute(ctx context.Context, data ExecuteMeta, session *agentTypes.AgentSes
 		choice := resp.Choices[0]
 		if choice.Message.ReasoningContent == "" {
 			if s, ok := choice.Message.Content.(string); ok {
-				if think, rest := splitThinkTag(s); think != "" {
+				if think, rest := extractThinkTag(s); think != "" {
 					choice.Message.ReasoningContent = think
 					choice.Message.Content = rest
 				}
@@ -716,7 +727,7 @@ func Execute(ctx context.Context, data ExecuteMeta, session *agentTypes.AgentSes
 		if len(choice.Message.ToolCalls) > 0 {
 			emptyCount = 0
 			if text, ok := choice.Message.Content.(string); ok {
-				if stripped := StripModelResponse(text); stripped != "" && !isGuardrailRefusal(stripped) {
+				if stripped := Response(text); stripped != "" && !strings.Contains(stripped, configs.BAN_TAG) {
 					if textEmitted {
 						events <- agentTypes.Event{Type: agentTypes.EventTextDone}
 					} else {
@@ -765,7 +776,7 @@ func Execute(ctx context.Context, data ExecuteMeta, session *agentTypes.AgentSes
 				continue
 			}
 
-			stripped := StripModelResponse(str)
+			stripped := Response(str)
 			if stripped == "" {
 				if emptyRetryExhausted(&emptyCount, events, session.ID, exec.PendingTask, data.Agent.Name(), "content stripped to empty", &usage, execStart, sendElapsedTotal) {
 					return nil
@@ -774,7 +785,7 @@ func Execute(ctx context.Context, data ExecuteMeta, session *agentTypes.AgentSes
 			}
 			emptyCount = 0
 
-			if isGuardrailRefusal(stripped) {
+			if strings.Contains(stripped, configs.BAN_TAG) {
 				refusal := guardrailRefusal(session.ID, data.Agent.Name(), stripped)
 				sendText(events, refusal)
 				emitChangedFiles()
@@ -851,8 +862,8 @@ func Execute(ctx context.Context, data ExecuteMeta, session *agentTypes.AgentSes
 
 		emitReasoning(events, resp.Choices[0].Message.ReasoningContent, &shownReasoning)
 		if text, ok := resp.Choices[0].Message.Content.(string); ok && text != "" {
-			summaryStripped := StripModelResponse(text)
-			if isGuardrailRefusal(summaryStripped) {
+			summaryStripped := Response(text)
+			if strings.Contains(summaryStripped, configs.BAN_TAG) {
 				refusal := guardrailRefusal(session.ID, data.Agent.Name(), summaryStripped)
 				sendText(events, refusal)
 				emitChangedFiles()

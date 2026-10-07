@@ -10,6 +10,7 @@ import (
 	"github.com/pardnchiu/go-pkg/filesystem/keychain"
 	go_pkg_http "github.com/pardnchiu/go-pkg/http"
 
+	"github.com/pardnchiu/agenvoy/configs"
 	"github.com/pardnchiu/agenvoy/internal/runtime/torii"
 	"github.com/pardnchiu/agenvoy/internal/session/config"
 	"github.com/pardnchiu/agenvoy/internal/session/history"
@@ -18,12 +19,10 @@ import (
 )
 
 const (
-	typesafeEndpoint   = "https://api.typesafe.ai/v1/systemone"
-	betaContextTurns   = 4
-	betaContextMaxRune = 2048
-	betaNamedNone      = "none"
-	betaTopicSame      = "same"
-	betaLastModelKey   = "lastModel:"
+	typesafeEndpoint = "https://api.typesafe.ai/v1/systemone"
+	betaNamedNone    = "none"
+	betaTopicSame    = "same"
+	betaLastModelKey = "lastModel:"
 )
 
 var betaWorkCriteria = map[string]any{
@@ -88,13 +87,13 @@ type betaAnswer struct {
 	} `json:"answers"`
 }
 
-func selectAgentBeta(ctx context.Context, candidates []string, tiers map[string]string, request, sessionID string) ([]string, string, error) {
+func selectAgentBeta(ctx context.Context, candidates []string, tiers map[string]string, request, sessionID string) ([]string, string, int, error) {
 	key := strings.TrimSpace(keychain.Get(config.TypesafeKey))
 	if key == "" {
-		return nil, "", fmt.Errorf("missing key: %s", config.TypesafeKey)
+		return nil, "", 0, fmt.Errorf("missing key: %s", config.TypesafeKey)
 	}
 	if len(candidates) == 0 {
-		return candidates, "", nil
+		return candidates, "", 0, nil
 	}
 
 	named := map[string]any{betaNamedNone: "The request does not ask to use a specific model."}
@@ -149,19 +148,19 @@ func selectAgentBeta(ctx context.Context, candidates []string, tiers map[string]
 		"questions": questions,
 	}
 
-	routingCtx, cancel := context.WithTimeout(ctx, DispatcherCallTimeout)
+	routingCtx, cancel := context.WithTimeout(ctx, configs.TIMEOUT_DISPATCH_CALL)
 	defer cancel()
 	result, _, err := go_pkg_http.POST[betaAnswer](routingCtx, nil, typesafeEndpoint, map[string]string{
 		"Authorization": "Bearer " + key,
 	}, body, "json")
 	if err != nil {
-		return nil, "", fmt.Errorf("go_pkg_http.POST: %w", err)
+		return nil, "", 0, fmt.Errorf("go_pkg_http.POST: %w", err)
 	}
 
 	work := result.Answers["work"].Choice
 	order, ok := config.WorkTiers(work)
 	if !ok {
-		return nil, "", fmt.Errorf("invalid work choice: %q", work)
+		return nil, "", 0, fmt.Errorf("invalid work choice: %q", work)
 	}
 
 	list := make([]string, 0, len(candidates)+1)
@@ -169,25 +168,22 @@ func selectAgentBeta(ctx context.Context, candidates []string, tiers map[string]
 		list = append(list, choice)
 	}
 	level := config.WorkReasoning(work)
-	if previous != "" && result.Answers["topic"].Choice == betaTopicSame {
-		if len(list) == 0 || list[0] == previous {
-			prev, prevOK := provider.ParseReasoning(previousReasoning)
-			cur, curOK := provider.ParseReasoning(level)
-			if prevOK && (!curOK || prev > cur) {
-				level = previousReasoning
-			}
+	if previous != "" && result.Answers["topic"].Choice == betaTopicSame && (len(list) == 0 || list[0] == previous) {
+		if _, ok := provider.ParseReasoning(previousReasoning); ok {
+			level = previousReasoning
 		}
-		if !slices.Contains(list, previous) {
+		if len(list) == 0 {
 			list = append(list, previous)
 		}
 	}
+	pinned := len(list)
 
 	for _, name := range rankCandidates(work, order, tiers, candidates) {
 		if !slices.Contains(list, name) {
 			list = append(list, name)
 		}
 	}
-	return list, level, nil
+	return list, level, pinned, nil
 }
 
 func betaLastModelTTL(name string) int64 {
@@ -225,18 +221,18 @@ func betaContext(sessionID string) []map[string]string {
 
 	list := []map[string]string{}
 	for _, r := range slices.Backward(records) {
-		if len(list) >= betaContextTurns {
+		if len(list) >= configs.MAX_JEV_HISTORY_MESSAGES {
 			break
 		}
 		if r.Role != "user" && r.Role != "assistant" {
 			continue
 		}
-		text := strings.TrimSpace(history.StripPrefix(r.Text()))
+		text := strings.TrimSpace(configs.MESSAGE_PREFIX_REGEX.ReplaceAllString(r.Text(), ""))
 		if text == "" {
 			continue
 		}
-		if runes := []rune(text); len(runes) > betaContextMaxRune {
-			text = string(runes[:betaContextMaxRune]) + "..."
+		if runes := []rune(text); len(runes) > configs.MAX_JEV_RUNES {
+			text = string(runes[:configs.MAX_JEV_RUNES]) + "..."
 		}
 		list = append(list, map[string]string{"role": r.Role, "content": text})
 	}

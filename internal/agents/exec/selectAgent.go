@@ -8,7 +8,6 @@ import (
 	"log/slog"
 	"slices"
 	"strings"
-	"time"
 
 	go_pkg_filesystem "github.com/pardnchiu/go-pkg/filesystem"
 
@@ -23,17 +22,6 @@ import (
 	"github.com/pardnchiu/agenvoy/internal/session/config"
 	configBot "github.com/pardnchiu/agenvoy/internal/session/config/bot"
 	provider "github.com/pardnchiu/go-llm-router/core"
-)
-
-const (
-	DispatcherCallTimeout        = 30 * time.Second
-	TypesafeCallTimeout          = 3 * time.Second
-	UnresponsiveProbeInterval    = 30 * time.Second
-	UnresponsiveRetryInterval    = 10 * time.Second
-	MaxUnresponsiveProbeFailures = 3
-	HealthCheckTimeout           = 10 * time.Second
-	SendTimeoutRetryInterval     = 15 * time.Second
-	MaxSendTimeoutRetries        = 3
 )
 
 type AgentConfig struct {
@@ -81,19 +69,20 @@ func selectorConfig() (tiers map[string]string, selection string, beta bool) {
 	return tiers, selection, beta
 }
 
-func runSelector(ctx context.Context, bot agentTypes.Agent, registry agentTypes.AgentRegistry, candidates []string, tiers map[string]string, selection string, beta bool, content, sessionID string, dead map[string]bool) ([]string, string) {
+func runSelector(ctx context.Context, bot agentTypes.Agent, registry agentTypes.AgentRegistry, candidates []string, tiers map[string]string, selection string, beta bool, content, sessionID string, dead map[string]bool) ([]string, string, int) {
 	if beta {
-		betaCtx, cancel := context.WithTimeout(ctx, TypesafeCallTimeout)
-		list, level, err := selectAgentBeta(betaCtx, candidates, tiers, content, sessionID)
+		betaCtx, cancel := context.WithTimeout(ctx, configs.TIMEOUT_JEV_CALL)
+		list, level, pinned, err := selectAgentBeta(betaCtx, candidates, tiers, content, sessionID)
 		cancel()
 		if err == nil {
-			return list, level
+			return list, level, pinned
 		}
 		if ctx.Err() == nil {
 			slog.Debug("beta dispatcher failed", slog.String("error", err.Error()))
 		}
 	}
-	return selectAgentDispatcher(ctx, bot, registry, selection, content, sessionID, dead)
+	list, level := selectAgentDispatcher(ctx, bot, registry, selection, content, sessionID, dead)
+	return list, level, 0
 }
 
 func selectAgentDispatcher(ctx context.Context, bot agentTypes.Agent, registry agentTypes.AgentRegistry, selection, content, sessionID string, dead map[string]bool) ([]string, string) {
@@ -115,7 +104,7 @@ func selectAgentDispatcher(ctx context.Context, bot agentTypes.Agent, registry a
 		if ctx.Err() != nil {
 			return nil, ""
 		}
-		routingCtx, cancel := context.WithTimeout(dispatchCtx, DispatcherCallTimeout)
+		routingCtx, cancel := context.WithTimeout(dispatchCtx, configs.TIMEOUT_DISPATCH_CALL)
 		resp, sendCode, sendErr := bot.Send(routingCtx, messages, nil, provider.ReasoningNone, fast.Mode())
 		cancel()
 		if sendErr == nil {
@@ -154,7 +143,7 @@ func selectAgentDispatcher(ctx context.Context, bot agentTypes.Agent, registry a
 }
 
 func selectReasoning(ctx context.Context, bot agentTypes.Agent, registry agentTypes.AgentRegistry, names []string, tiers map[string]string, selection string, beta bool, content, sessionID string) string {
-	_, level := runSelector(ctx, bot, registry, names, tiers, selection, beta, content, sessionID, map[string]bool{})
+	_, level, _ := runSelector(ctx, bot, registry, names, tiers, selection, beta, content, sessionID, map[string]bool{})
 	return level
 }
 
@@ -167,7 +156,7 @@ func SelectAgentNames(ctx context.Context, bot agentTypes.Agent, registry agentT
 	if sessionID != "" {
 		sessionModel, sessionReasoning = configBot.GetModel(sessionID)
 	}
-	autoReasoning := sessionReasoning == configBot.ReasoningAuto
+	autoReasoning := sessionReasoning == configs.REASONING_AUTO
 
 	if sessionModel != "" && sessionModel != configBot.DefaultModel {
 		if _, ok := registry.Registry[sessionModel]; ok {
@@ -204,7 +193,7 @@ func SelectAgentNames(ctx context.Context, bot agentTypes.Agent, registry agentT
 		}
 	}
 
-	list, level := runSelector(ctx, bot, registry, candidates, tiers, selection, beta, userContent, sessionID, dead)
+	list, level, pinned := runSelector(ctx, bot, registry, candidates, tiers, selection, beta, userContent, sessionID, dead)
 
 	picked := []string{}
 	seen := map[string]bool{}
@@ -234,7 +223,12 @@ func SelectAgentNames(ctx context.Context, bot agentTypes.Agent, registry agentT
 	if autoReasoning {
 		reasoning = level
 	}
-	return orderProviders(picked), dead, reasoning
+	sticky := list[:min(pinned, len(list))]
+	head := 0
+	for head < len(picked) && slices.Contains(sticky, picked[head]) {
+		head++
+	}
+	return append(picked[:head:head], orderProviders(picked[head:])...), dead, reasoning
 }
 
 func parseDispatcherReply(raw string) (string, []string) {
@@ -321,8 +315,6 @@ func SelectAgent(ctx context.Context, bot agentTypes.Agent, registry agentTypes.
 	return registry.Fallback
 }
 
-const maxFallbackRounds = 3
-
 func nextAgent(ctx context.Context, sessionID, currentModel string, fallbacks *[]agentTypes.Agent, allAgents []agentTypes.Agent, round *int, inputTokens int) (agentTypes.Agent, string) {
 	if model, _ := configBot.GetModel(sessionID); model != "" && model != configBot.DefaultModel {
 		return nil, ""
@@ -347,7 +339,7 @@ func nextAgent(ctx context.Context, sessionID, currentModel string, fallbacks *[
 			return agent, name
 		}
 		*round++
-		if *round >= maxFallbackRounds {
+		if *round > configs.MAX_RETRY_TIMES {
 			return nil, ""
 		}
 		if ctx.Err() != nil {
@@ -355,7 +347,7 @@ func nextAgent(ctx context.Context, sessionID, currentModel string, fallbacks *[
 		}
 		slog.Warn("all agents failed, starting retry round",
 			slog.Int("round", *round+1),
-			slog.Int("max", maxFallbackRounds))
+			slog.Int("max", configs.MAX_RETRY_TIMES+1))
 		rebuilt := make([]agentTypes.Agent, len(others))
 		copy(rebuilt, others)
 		*fallbacks = rebuilt
@@ -398,13 +390,13 @@ func pickHealthyFallback(ctx context.Context, fallbacks *[]agentTypes.Agent) (ag
 		if cand == nil {
 			continue
 		}
-		if checkAgentResponsive(ctx, cand, HealthCheckTimeout) {
+		if checkAgentAlive(ctx, cand, configs.HEALTH_CHECK_TIMEOUT) {
 			return cand, cand.Name()
 		}
 		if ctx.Err() == nil {
 			slog.Debug("fallback health check failed",
 				slog.String("name", cand.Name()),
-				slog.Duration("timeout", HealthCheckTimeout))
+				slog.Duration("timeout", configs.HEALTH_CHECK_TIMEOUT))
 		}
 	}
 	return nil, ""
@@ -418,7 +410,7 @@ func ResolveAgent(ctx context.Context, model, userInput string, hasSkill bool, s
 			return nil, nil, "", fmt.Errorf("model %q not found", model)
 		}
 		reasoning := ""
-		if _, level := configBot.GetModel(sessionID); level == configBot.ReasoningAuto {
+		if _, level := configBot.GetModel(sessionID); level == configs.REASONING_AUTO {
 			tiers, selection, beta := selectorConfig()
 			reasoning = selectReasoning(ctx, agents.DispatcherBot(), registry, []string{model}, tiers, selection, beta, requestContent(userInput, hasSkill, skillHint), sessionID)
 		}

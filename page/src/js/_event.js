@@ -31,12 +31,6 @@ function renderEvent(view, event) {
     return;
   }
 
-  if (type === "EventSuggest") {
-    view.suggests = event.suggests || [];
-    renameChat(view.session, event.text || "");
-    return;
-  }
-
   if (type === "EventCanceled") {
     view.think.open = false;
     const canceled = assistantFooter(
@@ -65,6 +59,7 @@ function renderEvent(view, event) {
       view.model.replaceChildren(`${model}/${event.reasoning}`);
     }
     loadModelQuota(view, model);
+    loadFollowup(view);
     view.think.open = false;
     delete view.think.dataset.streaming;
     const usage = event.usage || {};
@@ -81,7 +76,6 @@ function renderEvent(view, event) {
     );
     view.footer.replaceWith(footer);
     view.footer = footer;
-    renderSuggest(view);
     return;
   }
 
@@ -169,6 +163,24 @@ function formatEvent(event) {
   return event.text || "";
 }
 
+async function loadFollowup(view) {
+  if (!view.session) {
+    return;
+  }
+  try {
+    const response = await fetch(`${API}/v1/session/${encodeURIComponent(view.session)}/followup`, { method: "POST" });
+    if (!response.ok) {
+      return;
+    }
+    const body = await response.json();
+    renameChat(view.session, body.title || "");
+    view.suggests = body.suggests || [];
+    renderSuggest(view);
+  } catch (err) {
+    console.error("loadFollowup", err);
+  }
+}
+
 async function loadModelQuota(view, model) {
   if (!model || !model.includes("@")) {
     return;
@@ -183,7 +195,8 @@ async function loadModelQuota(view, model) {
       return;
     }
     const quota = _("span.quota", text);
-    quota.dataset.level = quotaLevel(text.endsWith("%") ? "percent" : "balance", parseFloat(text));
+    const percents = (text.match(/\d+(?:\.\d+)?(?=%)/g) || []).map(Number);
+    quota.dataset.level = quotaLevel(percents.length ? "percent" : "balance", percents.length ? Math.min(...percents) : parseFloat(text));
     view.model.querySelector("span.quota")?.remove();
     view.model.appendChild(quota);
   } catch (err) {

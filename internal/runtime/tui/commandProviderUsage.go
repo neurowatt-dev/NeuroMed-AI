@@ -10,14 +10,13 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 
-	"github.com/pardnchiu/agenvoy/internal/agents/claudeCode"
 	"github.com/pardnchiu/agenvoy/internal/agents/exec"
 	agentKeychain "github.com/pardnchiu/agenvoy/internal/agents/keychain"
 	provider "github.com/pardnchiu/go-llm-router/core"
+	"github.com/pardnchiu/go-llm-router/core/claudeCode"
 	"github.com/pardnchiu/go-llm-router/core/copilot"
 	"github.com/pardnchiu/go-llm-router/core/deepseek"
 	grokoauth "github.com/pardnchiu/go-llm-router/core/grokOauth"
-	ollamacloud "github.com/pardnchiu/go-llm-router/core/ollamaCloud"
 	openrouter "github.com/pardnchiu/go-llm-router/core/openRouter"
 	openaicodex "github.com/pardnchiu/go-llm-router/core/openaiCodex"
 )
@@ -30,7 +29,6 @@ func (t TUI) commandProviderUsage() (TUI, tea.Cmd, bool) {
 	hasCodex := false
 	hasGrokOauth := false
 	hasCopilot := false
-	hasOllamaCloud := false
 	hasDeepseek := false
 	hasOpenRouter := false
 	hasClaudeCode := false
@@ -43,17 +41,15 @@ func (t TUI) commandProviderUsage() (TUI, tea.Cmd, bool) {
 			hasGrokOauth = true
 		case "copilot":
 			hasCopilot = true
-		case "ollama-cloud":
-			hasOllamaCloud = true
 		case "deepseek":
 			hasDeepseek = true
 		case "openrouter":
 			hasOpenRouter = true
-		case claudeCode.Provider:
+		case "claude-code":
 			hasClaudeCode = true
 		}
 	}
-	if !hasCodex && !hasGrokOauth && !hasCopilot && !hasOllamaCloud && !hasDeepseek && !hasOpenRouter && !hasClaudeCode {
+	if !hasCodex && !hasGrokOauth && !hasCopilot && !hasDeepseek && !hasOpenRouter && !hasClaudeCode {
 		return t, nil, true
 	}
 
@@ -81,10 +77,6 @@ func (t TUI) commandProviderUsage() (TUI, tea.Cmd, bool) {
 			wg.Add(1)
 			go fetch(3, func() string { return fetchProviderUsage(ctx, "Copilot", "copilot", copilot.Usage) })
 		}
-		if hasOllamaCloud {
-			wg.Add(1)
-			go fetch(4, func() string { return fetchProviderUsage(ctx, "Ollama Cloud", "ollama-cloud", ollamacloud.Usage) })
-		}
 		if hasOpenRouter {
 			wg.Add(1)
 			go fetch(5, func() string { return fetchProviderUsage(ctx, "OpenRouter", "openrouter", openrouter.Usage) })
@@ -95,7 +87,7 @@ func (t TUI) commandProviderUsage() (TUI, tea.Cmd, bool) {
 		}
 		if hasClaudeCode {
 			wg.Add(1)
-			go fetch(0, func() string { return fetchProviderUsage(ctx, "Claude Code", claudeCode.Provider, claudeCode.Usage) })
+			go fetch(0, func() string { return fetchProviderUsage(ctx, "Claude Code", "claude-code", claudeCode.Usage) })
 		}
 		wg.Wait()
 

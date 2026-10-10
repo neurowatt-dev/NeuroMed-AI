@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 
 	provider "github.com/pardnchiu/go-llm-router/core"
+	"github.com/pardnchiu/go-llm-router/core/claudeCode"
 )
 
 type Agent = provider.Agent
@@ -18,6 +19,17 @@ func WithSessionID(ctx context.Context, sessionID string) context.Context {
 func SessionIDFrom(ctx context.Context) string {
 	sid, _ := ctx.Value(sessionIDCtxKey{}).(string)
 	return sid
+}
+
+type windowHashCtxKey struct{}
+
+func WithWindowHash(ctx context.Context, hash string) context.Context {
+	return context.WithValue(ctx, windowHashCtxKey{}, hash)
+}
+
+func WindowHash(ctx context.Context) string {
+	hash, _ := ctx.Value(windowHashCtxKey{}).(string)
+	return hash
 }
 
 type originCtxKey struct{}
@@ -73,6 +85,7 @@ type AgentSession struct {
 	SystemPrompts  []provider.Message
 	OldHistories   []provider.Message
 	SummaryMessage provider.Message
+	TurnContext    provider.Message
 	UserInput      provider.Message
 	ToolHistories  []provider.Message
 	Tools          []provider.Message
@@ -81,4 +94,10 @@ type AgentSession struct {
 	Sender         string
 	UserSendAt     int64
 	Stateless      bool
+}
+
+var EnableClaudeCode bool
+
+func ClaudeCodeEnabled() bool {
+	return EnableClaudeCode && claudeCode.CheckBinary() == nil
 }

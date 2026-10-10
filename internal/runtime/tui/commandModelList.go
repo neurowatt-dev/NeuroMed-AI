@@ -8,9 +8,11 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 
 	"github.com/pardnchiu/agenvoy/internal/agents"
-	"github.com/pardnchiu/agenvoy/internal/agents/claudeCode"
+	agentTypes "github.com/pardnchiu/agenvoy/internal/agents/types"
 	"github.com/pardnchiu/agenvoy/internal/session/config"
 	configBot "github.com/pardnchiu/agenvoy/internal/session/config/bot"
+
+	"github.com/pardnchiu/go-llm-router/core/claudeCode"
 )
 
 const sessionModelPrefix = "model:"
@@ -40,12 +42,12 @@ func registeredModelOptions(sid string) (options, values []string, cursor int) {
 	options = append(options, auto)
 	values = append(values, sessionModelPrefix+configBot.DefaultModel)
 
-	skipClaudeCode := !claudeCode.Enabled()
+	skipClaudeCode := !agentTypes.ClaudeCodeEnabled()
 	for _, m := range cfg.Models {
 		if skipClaudeCode && claudeCode.Is(m.Name) {
 			continue
 		}
-		label := "⇅ " + m.Name
+		label := m.Name
 		if m.Name == current {
 			label += "  " + systemStyle.Render("[current]")
 			cursor = len(options)
@@ -78,20 +80,41 @@ func (t TUI) runSessionModelSelect(name string) (TUI, tea.Cmd) {
 	return t, nil
 }
 
-func swapModelPriority(name, other string) error {
+type ModelOrderSave struct {
+	names []string
+	next  any
+}
+
+func saveModelOrder(names []string) error {
 	cfg, err := config.Load()
 	if err != nil {
 		return fmt.Errorf("config.Load: %w", err)
 	}
-	i := slices.IndexFunc(cfg.Models, func(m config.ModelEntry) bool { return m.Name == name })
-	j := slices.IndexFunc(cfg.Models, func(m config.ModelEntry) bool { return m.Name == other })
-	if i == -1 || j == -1 {
-		return fmt.Errorf("model not registered: %s / %s", name, other)
+	var slots []int
+	for i, m := range cfg.Models {
+		if slices.Contains(names, m.Name) {
+			slots = append(slots, i)
+		}
 	}
-	cfg.Models[i], cfg.Models[j] = cfg.Models[j], cfg.Models[i]
+	if len(slots) != len(names) {
+		return fmt.Errorf("model list changed, reorder again")
+	}
+	for k, i := range slots {
+		cfg.Models[i] = config.ModelEntry{Name: names[k]}
+	}
 	if err := config.Save(cfg); err != nil {
 		return fmt.Errorf("config.Save: %w", err)
 	}
 	agents.Reload()
 	return nil
+}
+
+func (t TUI) runModelOrderSave(msg ModelOrderSave) (tea.Model, tea.Cmd) {
+	if err := saveModelOrder(msg.names); err != nil {
+		return t, notice(msgError(fmt.Sprintf("fallback order: %v", err)) + "\n")
+	}
+	if msg.next == nil {
+		return t, nil
+	}
+	return t.update(msg.next)
 }

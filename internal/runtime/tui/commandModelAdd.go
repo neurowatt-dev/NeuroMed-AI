@@ -14,17 +14,19 @@ import (
 	"sync"
 	"time"
 
+	"github.com/charmbracelet/bubbles/textarea"
 	tea "github.com/charmbracelet/bubbletea"
 
 	"github.com/pardnchiu/agenvoy/internal/agents"
-	"github.com/pardnchiu/agenvoy/internal/agents/claudeCode"
 	"github.com/pardnchiu/agenvoy/internal/agents/exec/compact"
 	agentKeychain "github.com/pardnchiu/agenvoy/internal/agents/keychain"
 	"github.com/pardnchiu/agenvoy/internal/agents/probe"
+	agentTypes "github.com/pardnchiu/agenvoy/internal/agents/types"
 	"github.com/pardnchiu/agenvoy/internal/runtime/daemon"
 	"github.com/pardnchiu/agenvoy/internal/session/config"
 	provider "github.com/pardnchiu/go-llm-router/core"
 	"github.com/pardnchiu/go-llm-router/core/claude"
+	"github.com/pardnchiu/go-llm-router/core/claudeCode"
 	"github.com/pardnchiu/go-llm-router/core/cloudflare"
 	"github.com/pardnchiu/go-llm-router/core/copilot"
 	"github.com/pardnchiu/go-llm-router/core/deepseek"
@@ -170,7 +172,7 @@ func (t TUI) commandModelAdd() (TUI, tea.Cmd, bool) {
 		details := make([]string, 0, len(methods))
 		values := make([]string, 0, len(methods))
 		for _, m := range methods {
-			if m.value == claudeCode.Provider && !claudeCode.Enabled() {
+			if m.value == "claude-code" && !agentTypes.ClaudeCodeEnabled() {
 				continue
 			}
 			keys = append(keys, m.key)
@@ -222,7 +224,7 @@ func (t TUI) runModelAddProviderPick(name string) (TUI, tea.Cmd) {
 		return t.modelAddViaOAuth()
 	case "compat":
 		return t.openModelAddCompatURL()
-	case claudeCode.Provider:
+	case "claude-code":
 		if err := claudeCode.CheckBinary(); err != nil {
 			t.modelAdd = nil
 			return t, notice(msgError(err.Error()) + "\n")
@@ -857,11 +859,15 @@ func (t TUI) runCompatModelsResult(msg CompatModelsResult) (TUI, tea.Cmd) {
 	}
 
 	t.popup = &Popup{
-		kind:    popupMultiSelect,
-		title:   fmt.Sprintf("Select %s models (space toggle  enter confirm)", t.modelAdd.compatProvider),
-		options: options,
-		values:  values,
-		multi:   preSelected,
+		kind:       popupMultiSelect,
+		title:      fmt.Sprintf("Select %s models (space toggle  enter confirm)", t.modelAdd.compatProvider),
+		options:    options,
+		values:     values,
+		multi:      preSelected,
+		allOptions: options,
+		allValues:  values,
+		searchable: true,
+		input:      newModelSearchInput(),
 		onConfirm: func(chosen string) any {
 			return ModelAddModelMultiPick{chosen: chosen}
 		},
@@ -883,7 +889,7 @@ var modelsProviders = map[string]func(context.Context, provider.Config, provider
 	"mistral":      mistral.Models,
 	"nvidia":       nvidia.Models,
 	"openrouter":   openrouter.Models,
-	claudeCode.Provider: func(ctx context.Context, cfg provider.Config, _ provider.ModelFilter) ([]string, error) {
+	"claude-code": func(ctx context.Context, cfg provider.Config, _ provider.ModelFilter) ([]string, error) {
 		return claudeCode.Models(ctx, cfg)
 	},
 }
@@ -929,11 +935,15 @@ func (t TUI) runRemoteModelsResult(msg RemoteModelsResult) (TUI, tea.Cmd) {
 	}
 
 	t.popup = &Popup{
-		kind:    popupMultiSelect,
-		title:   fmt.Sprintf("Select %s models (space toggle  enter confirm)", t.modelAdd.provider),
-		options: options,
-		values:  values,
-		multi:   preSelected,
+		kind:       popupMultiSelect,
+		title:      fmt.Sprintf("Select %s models (space toggle  enter confirm)", t.modelAdd.provider),
+		options:    options,
+		values:     values,
+		multi:      preSelected,
+		allOptions: options,
+		allValues:  values,
+		searchable: true,
+		input:      newModelSearchInput(),
 		onConfirm: func(chosen string) any {
 			return ModelAddModelMultiPick{chosen: chosen}
 		},
@@ -977,4 +987,13 @@ func windowTokenText(value int) string {
 	default:
 		return strconv.Itoa(value)
 	}
+}
+
+func newModelSearchInput() textarea.Model {
+	input := newPopupInput("", false)
+	input.Placeholder = "Search models..."
+	input.SetPromptFunc(2, func(int) string {
+		return hintStyle.Render("/ ")
+	})
+	return input
 }

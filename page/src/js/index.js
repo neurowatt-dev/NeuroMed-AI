@@ -355,6 +355,7 @@ document.addEventListener("DOMContentLoaded", async function () {
         }
         bindSelectPicker();
         bindFileLink();
+        bindCodeCopy();
         bindInputDrop();
         renderChatList();
 

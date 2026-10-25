@@ -60,8 +60,6 @@ func TUI() {
 			slog.Warn("daemon launch failed; running TUI without server",
 				slog.String("error", err.Error()))
 		}
-	} else if r, err := runtime.Read(); err == nil && r.EnableClaudeCode {
-		agenttypes.EnableClaudeCode = true
 	}
 
 	if err := torii.Init(filesystem.StoreDir); err != nil {

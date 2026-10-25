@@ -95,8 +95,6 @@ type Session struct {
 	Stateless        bool
 }
 
-var EnableClaudeCode bool
-
 func ClaudeCodeEnabled() bool {
-	return EnableClaudeCode && claudeCode.CheckBinary() == nil
+	return claudeCode.CheckBinary() == nil
 }

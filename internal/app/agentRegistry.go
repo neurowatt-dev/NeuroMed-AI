@@ -69,7 +69,7 @@ func routerConfig(ctx context.Context, name string) (router.Config, error) {
 		GatewayID: cfg.GatewayID,
 		BaseURL:   cfg.BaseURL,
 
-		EnableClaude: agenttypes.EnableClaudeCode,
+		EnableClaude: true,
 		StateDir:     filesystem.SessionsDir,
 	}, nil
 }

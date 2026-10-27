@@ -458,19 +458,15 @@ func Execute(ctx context.Context, data ExecuteMeta, session *agenttypes.Session,
 			}
 		}
 
-		watchdog := time.NewTimer(configs.UNRESPONSIVE_PROBE_INTERVAL)
-		unresponsiveFailures := 0
 		var resp *go_llm_router.Output
 		var sendCode int
 		var err error
 		var textEmitted bool
 		var reasoned bool
-		switched := false
 	waitSend:
 		for {
 			select {
 			case <-execCtx.Done():
-				watchdog.Stop()
 				stopSend()
 				events <- agenttypes.Event{Type: agenttypes.EventCanceled, Model: data.Agent.Name(), Duration: time.Since(execStart)}
 				if errors.Is(context.Cause(execCtx), runtime.ErrUserCanceled) {
@@ -480,72 +476,7 @@ func Execute(ctx context.Context, data ExecuteMeta, session *agenttypes.Session,
 			case out := <-resultCh:
 				resp, sendCode, err, textEmitted, reasoned = out.resp, out.code, out.err, out.textEmitted, out.reasoned
 				break waitSend
-			case <-watchdog.C:
-				if execmodel.CheckAlive(execCtx, data.Agent, configs.HEALTH_CHECK_TIMEOUT) {
-					unresponsiveFailures = 0
-					watchdog.Reset(configs.UNRESPONSIVE_PROBE_INTERVAL)
-					continue
-				}
-				unresponsiveFailures++
-				if unresponsiveFailures < configs.MAX_RETRY_TIMES {
-					slog.Debug("agent health probe failed, retrying",
-						slog.String("session", session.ID),
-						slog.String("name", data.Agent.Name()),
-						slog.Int("failures", unresponsiveFailures))
-					watchdog.Reset(configs.HEALTH_CHECK_TIMEOUT)
-					continue
-				}
-				next, nextName := execmodel.Next(execCtx, session.ID, data.Agent.Name(), &retryState)
-				if next == nil {
-					watchdog.Stop()
-					stopSend()
-					deadName := data.Agent.Name()
-					slog.Error("agent unresponsive, no healthy fallback; aborting",
-						slog.String("session", session.ID),
-						slog.String("name", deadName))
-					msg := fmt.Sprintf("upstream %s is unresponsive and no healthy fallback model is available.", deadName)
-					sendText(events, msg)
-					emitChangedFiles()
-					events <- agenttypes.Event{
-						Type:     agenttypes.EventDone,
-						Model:    deadName,
-						Usage:    &usage,
-						Duration: time.Since(execStart),
-					}
-					interactive.FinalizePending(session.ID, exec.PendingTask, msg)
-					return utilsmsg.New(utilsmsg.Unavailable, "agent "+deadName, "unresponsive, no healthy fallback")
-				}
-				unresponsiveFailures = 0
-				watchdog.Reset(configs.UNRESPONSIVE_PROBE_INTERVAL)
-				slog.Debug("agent unresponsive, switching model",
-					slog.String("session", session.ID),
-					slog.String("from", data.Agent.Name()),
-					slog.String("to", nextName))
-				events <- agenttypes.Event{
-					Type:      agenttypes.EventAgentResult,
-					Text:      nextName,
-					Model:     nextName,
-					Reasoning: reasoningLabel,
-				}
-				data.Agent = next
-				switched = true
-				break waitSend
 			}
-		}
-		watchdog.Stop()
-		if switched {
-			stopSend()
-			events <- agenttypes.Event{Type: agenttypes.EventCompact, Text: "tool_call"}
-			if !compact.RawToolFallback(session, exec.PendingTask) {
-				session.ToolHistories = nil
-			}
-			alreadyCall = make(map[string]string)
-			sendFailCount = 0
-			timeoutRetryCount = 0
-			rateLimitRetryCount = 0
-			emptyCount = 0
-			compactFailed = false
-			continue
 		}
 		sendDur := time.Since(sendStart)
 		sendElapsed := sendDur.Round(time.Second)

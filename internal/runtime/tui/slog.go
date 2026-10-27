@@ -114,6 +114,7 @@ func extractField(s, key string) string {
 func installSlogTUI() func() {
 	prev := slog.Default()
 	slog.SetDefault(slog.New(&tuiSlogHandler{}))
+	slog.SetLogLoggerLevel(slog.LevelDebug)
 
 	return func() {
 		slog.SetDefault(prev)

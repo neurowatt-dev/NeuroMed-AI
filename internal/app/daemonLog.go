@@ -77,6 +77,7 @@ func InstallDaemonLog() {
 
 	base := slog.NewTextHandler(writer, &slog.HandlerOptions{Level: slog.LevelDebug})
 	slog.SetDefault(slog.New(&daemonLogHandler{base: base}))
+	slog.SetLogLoggerLevel(slog.LevelDebug)
 }
 
 type daemonLogWriter struct {

@@ -41,7 +41,6 @@ const (
 
 	// * Retry
 	MAX_RETRY_TIMES             = 3
-	UNRESPONSIVE_PROBE_INTERVAL = 30 * time.Second
 	HEALTH_CHECK_TIMEOUT        = 10 * time.Second
 	SEND_TIMEOUT_RETRY_INTERVAL = 15 * time.Second
 	RATE_LIMIT_COOLDOWN         = 30 * time.Minute

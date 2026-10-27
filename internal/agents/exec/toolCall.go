@@ -432,7 +432,7 @@ func toolCall(ctx context.Context, exec *tooltypes.Executor, choice go_llm_route
 		if exec.UnmarkedTools[toolName] || activatedInBatch[toolName] {
 			schema := ""
 			if exec.UnmarkedTools[toolName] {
-				activateArgs, _ := json.Marshal(map[string]any{"mode": "search", "query": "select:" + toolName})
+				activateArgs, _ := json.Marshal(map[string]any{"mode": "search", "names": []string{toolName}})
 				out, err := toolregister.Dispatch(ctx, exec, "find_tools", activateArgs)
 				if err != nil {
 					slog.Warn("tool schema marking failed",

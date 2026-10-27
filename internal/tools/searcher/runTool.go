@@ -15,7 +15,7 @@ func registRunTool() {
 		SystemUse: true,
 		Description: `Runs a tool by name from the Tools list given before the user input, with args matching its schema.
 Every tool other than find_tools goes through here; the list holds names only.
-Before the first call to a name, fetch its schema with find_tools(query="select:NAME[,NAME]"), several names at once. Keyword search only when no listed name fits.`,
+Before the first call to a name, fetch its schema with find_tools(names=[NAME]), batching only the names the next step calls. Keyword query only when no listed name fits.`,
 		Parameters: map[string]any{
 			"type": "object",
 			"properties": map[string]any{

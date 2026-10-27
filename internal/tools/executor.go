@@ -149,7 +149,7 @@ func Execute(ctx context.Context, e *tooltypes.Executor, name string, args json.
 	args = normalizeArgs(args)
 
 	if e.UnmarkedTools[name] {
-		activateArgs, _ := json.Marshal(map[string]any{"mode": "search", "query": "select:" + name})
+		activateArgs, _ := json.Marshal(map[string]any{"mode": "search", "names": []string{name}})
 		if _, err := toolregister.Dispatch(ctx, e, "find_tools", activateArgs); err != nil {
 			slog.Warn("tool schema marking failed",
 				slog.String("name", name),

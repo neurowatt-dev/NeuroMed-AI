@@ -10,7 +10,10 @@ import (
 
 	go_pkg_filesystem_reader "github.com/pardnchiu/go-pkg/filesystem/reader"
 
+	"github.com/pardnchiu/agenvoy/configs"
+	agenttypes "github.com/pardnchiu/agenvoy/internal/agents/types"
 	"github.com/pardnchiu/agenvoy/internal/filesystem"
+	"github.com/pardnchiu/agenvoy/internal/runtime/pubsub"
 	configbot "github.com/pardnchiu/agenvoy/internal/session/config/bot"
 )
 
@@ -56,6 +59,11 @@ func WatchSession(ctx context.Context) func() {
 				slog.Debug("session created",
 					slog.String("session", sessionID),
 					slog.String("name", name))
+				pubsub.Pub(configs.DAEMON_LOG_CHANNEL, agenttypes.Event{
+					Type:   agenttypes.EventDaemonLog,
+					Source: slog.LevelDebug.String(),
+					Text:   "session created session=" + sessionID + " name=" + name,
+				})
 			case err, ok := <-w.Errors:
 				if !ok {
 					return

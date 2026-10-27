@@ -312,3 +312,85 @@ function startResume(sessionId, taskHash) {
   }
   resumePending({ sessionId: sessionId, taskHash: taskHash }, []);
 }
+
+async function listLiveTasks(sessionId) {
+  try {
+    const response = await fetch(`${API}/v1/session/${encodeURIComponent(sessionId)}/task?live=1`);
+    if (!response.ok) {
+      console.error("listLiveTasks", response.status);
+      return [];
+    }
+    return (await response.json()).pending || [];
+  } catch (err) {
+    console.error("listLiveTasks", err);
+    return [];
+  }
+}
+
+async function stopLiveTask(sessionId, taskHash) {
+  try {
+    const response = await fetch(`${API}/v1/session/${encodeURIComponent(sessionId)}/cancel/${encodeURIComponent(taskHash)}`, { method: "POST" });
+    if (!response.ok) {
+      pushToast(TOAST_LEVEL.ERROR, `cancel failed: ${response.status}`, nowClock());
+      return false;
+    }
+  } catch (err) {
+    console.error("stopLiveTask", err);
+    pushToast(TOAST_LEVEL.ERROR, `cancel failed: ${err?.message || err}`, nowClock());
+    return false;
+  }
+  return true;
+}
+
+async function renderTaskButton(sessionId) {
+  const panel = chatPanel(sessionId);
+  const dom = panel ? panel.querySelector(":scope > header button.task") : null;
+  if (!dom || !sessionId) {
+    return;
+  }
+  dom.dataset.live = (await listLiveTasks(sessionId)).length > 0 ? "1" : "0";
+}
+
+async function openTaskPicker(sessionId) {
+  if (!sessionId) {
+    return;
+  }
+
+  const tasks = await listLiveTasks(sessionId);
+  const list = _("div.list");
+
+  const cancel = _("button", { type: "button" }, "cancel");
+  const root = _("div.popup", [_("div.panel", [_("strong", "Live task"), list, _("footer", [cancel])])]);
+  root.id = "task-popup";
+
+  const close = () => root.remove();
+
+  if (tasks.length === 0) {
+    list.appendChild(_("p.empty", "No running task"));
+  }
+  for (const one of tasks) {
+    const title = String(one.objective || "").replace(/\s+/g, " ").trim() || one.task_hash;
+    const box = _("input", { type: "radio", name: "task-pick", value: one.task_hash });
+    const row = _("label", [box, _("div", [_("strong", title), _("p", one.task_hash)])]);
+    box.addEventListener("change", async () => {
+      box.checked = false;
+      if (!confirm(`Stop this task?\n\n${title}`)) {
+        return;
+      }
+      if (await stopLiveTask(sessionId, one.task_hash)) {
+        row.remove();
+        if (!list.querySelector("label")) {
+          list.appendChild(_("p.empty", "No running task"));
+        }
+      }
+    });
+    list.appendChild(row);
+  }
+
+  cancel.addEventListener("click", close);
+  root.addEventListener("click", (e) => {
+    if (e.target === root) close();
+  });
+
+  document.body.appendChild(root);
+}

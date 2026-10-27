@@ -173,12 +173,12 @@ function parseActionLog(content) {
     }
   }
 
-  return list.filter((item) => {
+  return list.filter((item, i) => {
     if (item.role === "user") {
       return true;
     }
     item.pending = !item.finished;
-    return Boolean(item.content || item.Reasoning);
+    return Boolean(item.content || item.Reasoning || (item.pending && i === list.length - 1));
   });
 }
 

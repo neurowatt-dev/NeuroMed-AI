@@ -161,6 +161,9 @@ function parseEvent(event) {
     trackTasking(task || taskOf(sessionId), event);
   }
   const terminal = event.type === "EventDone" || event.type === "EventCanceled" || event.type === "EventError";
+  if (terminal) {
+    setTimeout(() => renderTaskButton(sessionId), 1000);
+  }
   let view = taskStream(sessionId, task);
   if (!view) {
     view = streamOf(sessionId);

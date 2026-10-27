@@ -358,11 +358,25 @@ const refreshObserver = new IntersectionObserver(
         continue;
       }
       refreshObserver.unobserve(entry.target);
+      for (const section of entry.target.querySelectorAll("section.md-render[data-pending]")) {
+        section.innerHTML = MDParser.Parse(pendingMarkdown.get(section)).html();
+        pendingMarkdown.delete(section);
+        delete section.dataset.pending;
+      }
       refreshMarkdown(entry.target);
     }
   },
   { rootMargin: "128px 0px" },
 );
+
+const pendingMarkdown = new WeakMap();
+
+function pendingMarkdownSection(markdown) {
+  const section = _("section.md-render.nanomd", { "data-mode": "light", "data-pending": "" });
+  section.textContent = markdown;
+  pendingMarkdown.set(section, markdown);
+  return section;
+}
 
 function newAssisatantItem(item, sessionId) {
   const body = [_("p", (item.meta.model || "") + (item.meta.reasoning ? `/${item.meta.reasoning}` : ""))];
@@ -371,13 +385,13 @@ function newAssisatantItem(item, sessionId) {
     body.push(
       _("details.reasoning", [
         _("summary", ["Reasoning", _("span.material-symbols-outlined", "keyboard_arrow_down")]),
-        _("section.md-render.nanomd", { "data-mode": "light" }, MDParser.Parse(channelText(item.Reasoning, sessionId)).html()),
+        pendingMarkdownSection(channelText(item.Reasoning, sessionId)),
       ]),
     );
   }
 
   if (item.content) {
-    body.push(_("section.md-render.nanomd", { "data-mode": "light" }, MDParser.Parse(channelText(item.content, sessionId)).html()));
+    body.push(pendingMarkdownSection(channelText(item.content, sessionId)));
   }
 
   body.push(sourceBox(item.content));

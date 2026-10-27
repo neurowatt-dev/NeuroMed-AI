@@ -304,7 +304,7 @@ function escapeSubviewText(text) {
 
 function subviewDocument(body, markdown = false) {
   const script = markdown
-    ? `<script src="/vendor/nanomd/parser.min.js"></script><script>MDParser.Init({ fileEndpoint: ${JSON.stringify(`${API}/v1/file/open?path={filepath}`)}, parseHeading: false, enable: { mermaid: true, latex: true, chartjs: true, highlight: true } }).then(() => MDParser.Refresh(document.body)).catch((err) => console.error(err.message))</script>`
+    ? `<script src="/vendor/nanomd/parser.min.js"></script><script>MDParser.Init({ fileEndpoint: ${JSON.stringify(`${API}/v1/file/open?path={filepath}`)}, parseHeading: false, enable: { mermaid: true, latex: true, chartjs: true, highlight: true } }).then(() => { if (window.Chart) { Chart.defaults.animation = false; } return MDParser.Refresh(document.body); }).catch((err) => console.error(err.message))</script>`
     : "";
   return `<!doctype html><html><head><meta charset="utf-8"><base href="${location.origin}${location.pathname}"><link rel="stylesheet" href="public/index.css"></head><body class="subview">${body}${script}</body></html>`;
 }
@@ -313,7 +313,13 @@ const parserReady = MDParser.Init({
   fileEndpoint: `${API}/v1/file/open?path={filepath}`,
   parseHeading: false,
   enable: { mermaid: true, latex: true, chartjs: true, highlight: true },
-}).catch((err) => console.error(err.message));
+})
+  .then(() => {
+    if (window.Chart) {
+      Chart.defaults.animation = false;
+    }
+  })
+  .catch((err) => console.error(err.message));
 
 async function refreshMarkdown(root) {
   await parserReady;

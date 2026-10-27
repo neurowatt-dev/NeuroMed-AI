@@ -62,7 +62,7 @@ function closePendingTask(sessionId, taskHash) {
     return;
   }
 
-  for (const hint of dom.querySelectorAll(`button.hint[data-task="${taskHash}"]`)) {
+  for (const hint of dom.querySelectorAll(`div.hint[data-task="${taskHash}"]`)) {
     hint.remove();
   }
 
@@ -238,7 +238,7 @@ function clearPendingHint(sessionId) {
   if (!dom) {
     return;
   }
-  for (const old of dom.querySelectorAll(":scope > button.hint")) {
+  for (const old of dom.querySelectorAll(":scope > div.hint")) {
     old.remove();
   }
 }
@@ -270,11 +270,28 @@ async function renderPendingHint(sessionId) {
   const dom = chatPart("pending", sessionId);
   for (const one of tasks) {
     const title = String(one.objective || "").replace(/\s+/g, " ").trim() || one.task_hash;
-    const dot = _("button", { type: "button", class: "hint", "data-task": one.task_hash }, [
+    const open = _("button", { type: "button", class: "open" }, [
       _("span.material-symbols-outlined", "live_help"),
       _("p", title),
     ]);
-    dot.addEventListener("click", () => {
+    const remove = _("button", { type: "button", class: "remove", title: "Delete", "aria-label": "Delete" }, [
+      _("span.material-symbols-outlined", "delete"),
+    ]);
+    const hint = _("div", { class: "hint", "data-task": one.task_hash }, [open, remove]);
+    remove.addEventListener("click", async () => {
+      if (!confirm(`Delete this task?\n\n${title}`)) {
+        return;
+      }
+      if (!(await deletePending(sessionId, one.task_hash))) {
+        return;
+      }
+      hint.remove();
+      const cookie = readTaskCookie();
+      if (cookie && cookie.session === sessionId && cookie.task === one.task_hash) {
+        clearTaskCookie(sessionId);
+      }
+    });
+    open.addEventListener("click", () => {
       writeTaskCookie(sessionId, one.task_hash);
       if (one.has_questions) {
         loadPending(sessionId, one.task_hash);
@@ -285,7 +302,7 @@ async function renderPendingHint(sessionId) {
       }
       startResume(sessionId, one.task_hash);
     });
-    dom.appendChild(dot);
+    dom.appendChild(hint);
   }
 }
 

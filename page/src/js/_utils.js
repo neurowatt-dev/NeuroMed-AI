@@ -113,7 +113,9 @@ function chatPanel(sessionId) {
   }
 
   const id = sessionId || currentSessionId;
-  return id ? chat.querySelector(`:scope > [data-id="${id}"]`) : chat.querySelector(":scope > main");
+  return id
+    ? chat.querySelector(`:scope > [data-id="${id}"], :scope > div.subagent-panel > [data-id="${id}"]`)
+    : chat.querySelector(":scope > main");
 }
 
 let activePins = [];

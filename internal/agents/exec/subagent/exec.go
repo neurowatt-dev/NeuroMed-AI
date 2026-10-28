@@ -118,6 +118,11 @@ func Exec(ctx context.Context, task, sessionID, modelName, reasoning, systemProm
 	if parentSessID == "" {
 		parentSessID = agentstypes.SessionIDFrom(ctx)
 	}
+	pubsub.Pub(configs.DAEMON_LOG_CHANNEL, agentstypes.Event{
+		Type:   agentstypes.EventDaemonLog,
+		Source: slog.LevelDebug.String(),
+		Text:   "subagent started session=" + sessID + " parent=" + parentSessID,
+	})
 	subCtx, cancel := context.WithTimeout(agentstypes.WithDeliverTo(ctx, parentSessID), time.Duration(configs.MAX_SUBAGENT_TIMEOUT_MIN)*time.Minute)
 	defer cancel()
 

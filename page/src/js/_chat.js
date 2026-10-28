@@ -358,12 +358,19 @@ const refreshObserver = new IntersectionObserver(
         continue;
       }
       refreshObserver.unobserve(entry.target);
+      const messages = entry.target.parentElement;
+      const stick = messages.scrollHeight - messages.scrollTop - messages.clientHeight <= AUTO_SCROLL_SLACK;
+      const sessionId = panelSession(entry.target);
       for (const section of entry.target.querySelectorAll("section.md-render[data-pending]")) {
         section.innerHTML = MDParser.Parse(pendingMarkdown.get(section)).html();
         pendingMarkdown.delete(section);
         delete section.dataset.pending;
       }
-      refreshMarkdown(entry.target);
+      refreshMarkdown(entry.target).then(() => {
+        if (stick) {
+          scrollToBottom(true, sessionId);
+        }
+      });
     }
   },
   { rootMargin: "128px 0px" },

@@ -79,6 +79,9 @@ var (
 	MAX_SUBAGENT_TIMEOUT_MIN = 30
 	MAX_RESUME_WAIT_MIN      = 60
 
+	// * Tools
+	SYSTEM_DEFAULT_TOOLS = []string{"find_tools", "run_tool", "reasoning_guide", "write_todo"}
+
 	// * Pattern
 	RETRY_INTERVALS = []time.Duration{
 		5 * time.Second,

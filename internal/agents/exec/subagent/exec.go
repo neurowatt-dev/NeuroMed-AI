@@ -26,7 +26,7 @@ import (
 
 var channLen = make(chan struct{}, min(configs.MAX_CONCURRENT_TOOLS, configs.MAX_CONCURRENT_SUBAGENTS))
 
-func Exec(ctx context.Context, task, sessionID, modelName, reasoning, systemPrompt string, excludedTools []string, ignoreHistory bool) (string, error) {
+func Exec(ctx context.Context, task, sessionID, modelName, reasoning, systemPrompt string, excludedTools []string, ignoreHistory, topLevel bool) (string, error) {
 	// * step 1: model exist
 	registry := agents.ModelSet()
 	if len(registry.Registry) == 0 {
@@ -74,7 +74,7 @@ func Exec(ctx context.Context, task, sessionID, modelName, reasoning, systemProm
 
 	// * step 6: excluded tools
 	// * collection-only, no nesting, no writes, no deliverable renderers
-	toolExclude := append(append([]string{
+	baseExclude := []string{
 		"subagents",
 		"edit_file",
 		"edit_tool",
@@ -87,14 +87,28 @@ func Exec(ctx context.Context, task, sessionID, modelName, reasoning, systemProm
 		"schedules",
 		"store_secret",
 		"pkg_manage",
-	}, tools.TUIOnlyTools...), excludedTools...)
+	}
+	if topLevel {
+		baseExclude = []string{
+			"edit_tool",
+			"test_tool",
+			"edit_skill",
+			"schedules",
+			"store_secret",
+			"pkg_manage",
+		}
+	}
+	toolExclude := append(append(baseExclude, tools.TUIOnlyTools...), excludedTools...)
 
 	// * step 7: create task
 	trimSystemPrompt := strings.TrimSpace(systemPrompt)
-	if trimSystemPrompt != "" {
-		trimSystemPrompt = "---\n\n" + trimSystemPrompt
+	charter := ""
+	if !topLevel {
+		if trimSystemPrompt != "" {
+			trimSystemPrompt = "---\n\n" + trimSystemPrompt
+		}
+		charter = strings.TrimSpace(strings.ReplaceAll(configs.SubagentPrompt, "{{.SystemPrompt}}", trimSystemPrompt))
 	}
-	charter := strings.TrimSpace(strings.ReplaceAll(configs.SubagentPrompt, "{{.SystemPrompt}}", trimSystemPrompt))
 	hash := go_pkg_utils.UUID()
 	hashPath := filesystem.PendingMetaPath(sessID, hash)
 	taskMeta := exec.ExecuteMeta{

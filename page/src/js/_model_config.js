@@ -865,9 +865,6 @@ function providerCredentialForm(provider, method, added) {
   }
 
   if (method === "oauth") {
-    if (modelOAuth.id === provider.id && modelOAuth.code) {
-      return _("div.row", [_("p", "enter this code in the browser"), codeButton(modelOAuth.code)]);
-    }
     if (modelOAuth.id === provider.id) {
       return _("div.row", [_("p", "waiting for the browser...")]);
     }
@@ -973,6 +970,33 @@ function closeProviderOAuth() {
     modelStream.close();
     modelStream = null;
   }
+  $("#oauth-popup")?.remove();
+}
+
+function openOAuthPopup(id) {
+  $("#oauth-popup")?.remove();
+
+  const cancel = _("button", { type: "button" }, "cancel");
+  const open = _("button.submit", { type: "button" }, "open website");
+  const root = _("div.popup", [
+    _("div.panel", [
+      _("strong", `Sign in · ${id}`),
+      _("p", "enter this code in the browser"),
+      codeButton(modelOAuth.code),
+      _("footer", [cancel, open]),
+    ]),
+  ]);
+  root.id = "oauth-popup";
+
+  open.addEventListener("click", () => window.open(modelOAuth.url, "_blank", "noreferrer"));
+  cancel.addEventListener("click", () => {
+    closeProviderOAuth();
+    modelOAuth.id = "";
+    modelOAuth.code = "";
+    renderModel();
+  });
+
+  document.body.appendChild(root);
 }
 
 function startProviderOAuth(id) {
@@ -996,8 +1020,12 @@ function startProviderOAuth(id) {
     if (event.url) {
       modelOAuth.url = event.url;
       modelOAuth.code = event.user_code || "";
-      window.open(event.url, "_blank", "noreferrer");
       renderModel();
+      if (modelOAuth.code) {
+        openOAuthPopup(id);
+      } else {
+        window.open(event.url, "_blank", "noreferrer");
+      }
       return;
     }
     if (!event.done) {

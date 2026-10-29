@@ -9,7 +9,7 @@ let subscribeBound = false;
 function subscribeTargets(sessionId) {
   const list = [];
   const pinned = isWide() ? pinChats() : [];
-  for (const id of [sessionId].concat(pinned)) {
+  for (const id of [sessionId].concat(pinned, subagentSessions)) {
     if (typeof id === "string" && id !== "" && !list.includes(id)) {
       list.push(id);
     }
@@ -72,6 +72,10 @@ function subscribe(sessionId) {
     }
 
     if (event.type === "EventDaemonLog") {
+      if (String(event.text || "").startsWith(SUBAGENT_STARTED)) {
+        pinSubagent(event.text);
+        return;
+      }
       if (String(event.text || "").includes(SESSION_CREATED)) {
         renderChatList();
         appendDaemonLog(event.source, event.text);
@@ -161,6 +165,15 @@ function parseEvent(event) {
     trackTasking(task || taskOf(sessionId), event);
   }
   const terminal = event.type === "EventDone" || event.type === "EventCanceled" || event.type === "EventError";
+  if (terminal && subagentSessions.includes(sessionId) && !subagentFinished.includes(sessionId)) {
+    subagentFinished.push(sessionId);
+  }
+  if (event.type === "EventDone") {
+    parentDone(sessionId);
+  }
+  if (terminal) {
+    setTimeout(() => renderTaskButton(sessionId), 1000);
+  }
   let view = taskStream(sessionId, task);
   if (!view) {
     view = streamOf(sessionId);

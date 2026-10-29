@@ -104,13 +104,13 @@ var modelAddProviders = []struct {
 	{"API Key", []modelAddMethod{
 		{"OpenAI", "pay per token", "openai"},
 		{"Claude", "pay per token", "claude"},
-		{"Gemini", "pay per token", "gemini"},
 		{"Grok", "pay per token", "grok"},
+		{"Gemini", "pay per token", "gemini"},
 		{"DeepSeek", "pay per token", "deepseek"},
 		{"Mistral", "pay per token", "mistral"},
-		{"NVIDIA NIM", "pay per token", "nvidia"},
-		{"Ollama Cloud", "API key", "ollama-cloud"},
 		{"OpenRouter", "pay per token", "openrouter"},
+		{"Ollama Cloud", "API key", "ollama-cloud"},
+		{"NVIDIA NIM", "pay per token", "nvidia"},
 	}},
 	{"Custom", []modelAddMethod{
 		{"Cloudflare", "Workers AI  API token + account ID", "cloudflare"},

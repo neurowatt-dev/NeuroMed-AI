@@ -7,13 +7,11 @@ import (
 	"os"
 	osexec "os/exec"
 	"os/signal"
-	"slices"
 	"syscall"
 
 	go_pkg_sandbox "github.com/pardnchiu/go-pkg/sandbox"
 
 	"github.com/pardnchiu/agenvoy/configs"
-	agenttypes "github.com/pardnchiu/agenvoy/internal/agents/types"
 	"github.com/pardnchiu/agenvoy/internal/filesystem"
 	"github.com/pardnchiu/agenvoy/internal/runtime"
 	"github.com/pardnchiu/agenvoy/internal/runtime/mcp"
@@ -31,21 +29,7 @@ func main() {
 			return
 
 		case "--daemon":
-			agenttypes.EnableClaudeCode = slices.Contains(os.Args[2:], "--enable-claude-code")
 			Daemon()
-			return
-
-		case "--enable-claude-code":
-			if err := filesystem.Init(); err != nil {
-				fmt.Fprintf(os.Stderr, "filesystem.Init: %v\n", err)
-				os.Exit(1)
-			}
-			if runtime.IsCurrent() {
-				fmt.Fprintln(os.Stderr, "--enable-claude-code needs a stopped daemon: run `agen stop` first")
-				os.Exit(1)
-			}
-			agenttypes.EnableClaudeCode = true
-			TUI()
 			return
 
 		default:
@@ -65,7 +49,6 @@ func main() {
 func usage() {
 	fmt.Println("Usage:")
 	fmt.Println("  agen                                            Attach TUI; spawn server daemon if not running")
-	fmt.Println("  agen --enable-claude-code                       Start with the claude-code provider enabled (daemon must be stopped)")
 	fmt.Println("  agen stop                                       Stop the running server daemon")
 	fmt.Println("  agen update                                     Update agen to the latest release")
 }

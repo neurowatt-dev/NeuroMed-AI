@@ -62,7 +62,7 @@ function closePendingTask(sessionId, taskHash) {
     return;
   }
 
-  for (const hint of dom.querySelectorAll(`button.hint[data-task="${taskHash}"]`)) {
+  for (const hint of dom.querySelectorAll(`div.hint[data-task="${taskHash}"]`)) {
     hint.remove();
   }
 
@@ -238,7 +238,7 @@ function clearPendingHint(sessionId) {
   if (!dom) {
     return;
   }
-  for (const old of dom.querySelectorAll(":scope > button.hint")) {
+  for (const old of dom.querySelectorAll(":scope > div.hint")) {
     old.remove();
   }
 }
@@ -270,11 +270,28 @@ async function renderPendingHint(sessionId) {
   const dom = chatPart("pending", sessionId);
   for (const one of tasks) {
     const title = String(one.objective || "").replace(/\s+/g, " ").trim() || one.task_hash;
-    const dot = _("button", { type: "button", class: "hint", "data-task": one.task_hash }, [
+    const open = _("button", { type: "button", class: "open" }, [
       _("span.material-symbols-outlined", "live_help"),
       _("p", title),
     ]);
-    dot.addEventListener("click", () => {
+    const remove = _("button", { type: "button", class: "remove", title: "Delete", "aria-label": "Delete" }, [
+      _("span.material-symbols-outlined", "delete"),
+    ]);
+    const hint = _("div", { class: "hint", "data-task": one.task_hash }, [open, remove]);
+    remove.addEventListener("click", async () => {
+      if (!confirm(`Delete this task?\n\n${title}`)) {
+        return;
+      }
+      if (!(await deletePending(sessionId, one.task_hash))) {
+        return;
+      }
+      hint.remove();
+      const cookie = readTaskCookie();
+      if (cookie && cookie.session === sessionId && cookie.task === one.task_hash) {
+        clearTaskCookie(sessionId);
+      }
+    });
+    open.addEventListener("click", () => {
       writeTaskCookie(sessionId, one.task_hash);
       if (one.has_questions) {
         loadPending(sessionId, one.task_hash);
@@ -285,7 +302,7 @@ async function renderPendingHint(sessionId) {
       }
       startResume(sessionId, one.task_hash);
     });
-    dom.appendChild(dot);
+    dom.appendChild(hint);
   }
 }
 
@@ -294,4 +311,86 @@ function startResume(sessionId, taskHash) {
     clearPending(sessionId);
   }
   resumePending({ sessionId: sessionId, taskHash: taskHash }, []);
+}
+
+async function listLiveTasks(sessionId) {
+  try {
+    const response = await fetch(`${API}/v1/session/${encodeURIComponent(sessionId)}/task?live=1`);
+    if (!response.ok) {
+      console.error("listLiveTasks", response.status);
+      return [];
+    }
+    return (await response.json()).pending || [];
+  } catch (err) {
+    console.error("listLiveTasks", err);
+    return [];
+  }
+}
+
+async function stopLiveTask(sessionId, taskHash) {
+  try {
+    const response = await fetch(`${API}/v1/session/${encodeURIComponent(sessionId)}/cancel/${encodeURIComponent(taskHash)}`, { method: "POST" });
+    if (!response.ok) {
+      pushToast(TOAST_LEVEL.ERROR, `cancel failed: ${response.status}`, nowClock());
+      return false;
+    }
+  } catch (err) {
+    console.error("stopLiveTask", err);
+    pushToast(TOAST_LEVEL.ERROR, `cancel failed: ${err?.message || err}`, nowClock());
+    return false;
+  }
+  return true;
+}
+
+async function renderTaskButton(sessionId) {
+  const panel = chatPanel(sessionId);
+  const dom = panel ? panel.querySelector(":scope > header button.task") : null;
+  if (!dom || !sessionId) {
+    return;
+  }
+  dom.dataset.live = (await listLiveTasks(sessionId)).length > 0 ? "1" : "0";
+}
+
+async function openTaskPicker(sessionId) {
+  if (!sessionId) {
+    return;
+  }
+
+  const tasks = await listLiveTasks(sessionId);
+  const list = _("div.list");
+
+  const cancel = _("button", { type: "button" }, "cancel");
+  const root = _("div.popup", [_("div.panel", [_("strong", "Live task"), list, _("footer", [cancel])])]);
+  root.id = "task-popup";
+
+  const close = () => root.remove();
+
+  if (tasks.length === 0) {
+    list.appendChild(_("p.empty", "No running task"));
+  }
+  for (const one of tasks) {
+    const title = String(one.objective || "").replace(/\s+/g, " ").trim() || one.task_hash;
+    const box = _("input", { type: "radio", name: "task-pick", value: one.task_hash });
+    const row = _("label", [box, _("div", [_("strong", title), _("p", one.task_hash)])]);
+    box.addEventListener("change", async () => {
+      box.checked = false;
+      if (!confirm(`Stop this task?\n\n${title}`)) {
+        return;
+      }
+      if (await stopLiveTask(sessionId, one.task_hash)) {
+        row.remove();
+        if (!list.querySelector("label")) {
+          list.appendChild(_("p.empty", "No running task"));
+        }
+      }
+    });
+    list.appendChild(row);
+  }
+
+  cancel.addEventListener("click", close);
+  root.addEventListener("click", (e) => {
+    if (e.target === root) close();
+  });
+
+  document.body.appendChild(root);
 }

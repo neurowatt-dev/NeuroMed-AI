@@ -4,11 +4,13 @@ import (
 	"context"
 	"encoding/json"
 	"log/slog"
+	"slices"
 	"sort"
 	"time"
 
 	go_llm_router "github.com/pardnchiu/go-llm-router/core"
 
+	"github.com/pardnchiu/agenvoy/configs"
 	"github.com/pardnchiu/agenvoy/extensions"
 	"github.com/pardnchiu/agenvoy/internal/filesystem"
 	"github.com/pardnchiu/agenvoy/internal/runtime"
@@ -105,7 +107,7 @@ func NewExecutor(workPath, sessionID string, scanner *runtime.SkillScanner) (*to
 	unmarkedTools := make(map[string]bool)
 	for _, tool := range tools {
 		name := tool.Function.Name
-		if name == "find_tools" || name == "run_tool" || name == "reasoning_guide" {
+		if slices.Contains(configs.SYSTEM_DEFAULT_TOOLS, name) {
 			initial = append(initial, tool)
 			continue
 		}
@@ -149,7 +151,7 @@ func Execute(ctx context.Context, e *tooltypes.Executor, name string, args json.
 	args = normalizeArgs(args)
 
 	if e.UnmarkedTools[name] {
-		activateArgs, _ := json.Marshal(map[string]any{"mode": "search", "query": "select:" + name})
+		activateArgs, _ := json.Marshal(map[string]any{"mode": "search", "names": []string{name}})
 		if _, err := toolregister.Dispatch(ctx, e, "find_tools", activateArgs); err != nil {
 			slog.Warn("tool schema marking failed",
 				slog.String("name", name),

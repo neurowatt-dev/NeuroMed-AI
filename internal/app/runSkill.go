@@ -29,7 +29,7 @@ func RunSkill(ctx context.Context, sessionID, skillName string) (string, error) 
 			slog.String("error", err.Error()))
 	}
 
-	output, err := execsubagent.Exec(exec.WithSchedule(exec.WithBotPushPrefix(ctx, skillName)), body, sessionID, "", "", "", nil, false)
+	output, err := execsubagent.Exec(exec.WithSchedule(exec.WithBotPushPrefix(ctx, skillName)), body, sessionID, "", "", "", nil, false, true)
 	if err != nil {
 		return "", err
 	}

@@ -36,11 +36,13 @@ body[data-rendered="1"] section.right-content section.chat {
 
     &[data-style="0"] {
       > section > section.messages,
-      > section > div.input {
+      > section > div.input,
+      > div.subagent-panel > section > section.messages {
         width: calc(100% - 2rem);
       }
 
-      > section {
+      > section,
+      > div.subagent-panel > section {
         @media (hover: hover) {
           &:hover {
             &:after {
@@ -131,7 +133,8 @@ body[data-rendered="1"] section.right-content section.chat {
     }
 
     > main,
-    > section {
+    > section,
+    > div.subagent-panel > section {
       position: relative;
       flex-flow: column;
       justify-content: center;
@@ -173,6 +176,10 @@ body[data-rendered="1"] section.right-content section.chat {
 
         > header button[data-hide="1"] {
           display: flex;
+        }
+
+        > header button.task:not([data-live="1"]) {
+          display: none;
         }
 
         > header button[data-desktop="1"] {
@@ -337,6 +344,67 @@ body[data-rendered="1"] section.right-content section.chat {
       @include input.styles;
     }
 
+    &:has(> div.subagent-panel > section) > main {
+      width: 60%;
+    }
+
+    > div.subagent-panel {
+      z-index: 20;
+      position: absolute;
+      top: 0;
+      right: 0;
+      display: none;
+      width: 40%;
+      height: 100%;
+      box-shadow: -0.5rem 0 1rem -0.25rem #0000001a;
+
+      @media (min-width: 1280px) {
+        &:not(:empty) {
+          display: block;
+        }
+      }
+
+      > section {
+        position: absolute;
+        top: 0;
+        right: 0;
+        width: 100%;
+        height: 100%;
+      }
+
+      &:has(> section[data-index="1"]):not(:has(> section[data-index="2"])) > section {
+        height: 50%;
+
+        &[data-index="0"] {
+          border-bottom: 1px solid var(--gray-2);
+        }
+
+        &[data-index="1"] {
+          top: auto;
+          bottom: 0;
+        }
+      }
+
+      &:has(> section[data-index="2"]) > section {
+        height: 33%;
+
+        &[data-index="0"] {
+          border-bottom: 1px solid var(--gray-2);
+        }
+
+        &[data-index="1"] {
+          top: 33%;
+          border-bottom: 1px solid var(--gray-2);
+        }
+
+        &[data-index="2"] {
+          top: auto;
+          bottom: 0;
+          height: 34%;
+        }
+      }
+    }
+
     > div.subview {
       z-index: 1000;
       position: absolute;
@@ -445,7 +513,8 @@ body[data-rendered="1"] section.right-content section.chat {
       }
     }
 
-    > section {
+    > section,
+    > div.subagent-panel > section {
       display: none;
       background-color: #fdfdfd;
 

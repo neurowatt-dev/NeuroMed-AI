@@ -511,34 +511,6 @@ body section.right-content section.config {
         }
       }
 
-      button.code {
-        display: flex;
-        flex-flow: row;
-        align-items: center;
-        gap: 0.375rem;
-        box-sizing: border-box;
-        height: 2rem;
-        padding: 0 0.75rem;
-        border-radius: 0.375rem;
-        background-color: var(--gray-2);
-        color: var(--ink);
-        cursor: pointer;
-        transition: 0.2s;
-
-        @media (hover: hover) {
-          &:hover {
-            background-color: var(--black);
-            color: #fff;
-          }
-        }
-
-        > p {
-          font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
-          font-size: small;
-          letter-spacing: 0.5px;
-        }
-      }
-
       div.routing {
         display: flex;
         flex-flow: row;

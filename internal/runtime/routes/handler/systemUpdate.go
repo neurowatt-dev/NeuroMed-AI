@@ -25,7 +25,7 @@ import (
 
 const terminalLaunchTimeout = 10 * time.Second
 
-const latestReleaseURL = "https://github.com/agenvoy/Agenvoy/releases/latest/download/x"
+const latestReleaseURL = "https://github.com/pardnchiu/Agenvoy/releases/latest/download/x"
 
 var releaseClient = &http.Client{
 	Timeout: terminalLaunchTimeout,

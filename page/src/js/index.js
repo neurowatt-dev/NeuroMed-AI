@@ -235,6 +235,9 @@ document.addEventListener("DOMContentLoaded", async function () {
       memory_pick: function () {
         openMemoryPicker(panelSession(this) || currentSessionId);
       },
+      task_pick: function () {
+        openTaskPicker(panelSession(this) || currentSessionId);
+      },
       pin_add: function () {
         addPinChat(panelSession(this));
       },
@@ -371,10 +374,12 @@ document.addEventListener("DOMContentLoaded", async function () {
           renderWorkDirMark();
           renderChat(params.chat);
           renderPendingHint(params.chat);
+          renderTaskButton(params.chat);
 
           for (const pinned of pinnedChats) {
             renderChat(pinned);
             renderPendingHint(pinned);
+            renderTaskButton(pinned);
           }
 
           if (!voiceDisabled && config.harness_enable) {

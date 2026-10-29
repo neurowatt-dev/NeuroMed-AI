@@ -13,7 +13,7 @@ build:
 	@git fetch --tags --force 2>/dev/null || true
 	@ver=$$(git describe --tags --exact-match 2>/dev/null || echo '(dev)'); \
 	go build -tags "fts5" -ldflags "-X github.com/pardnchiu/agenvoy/internal/runtime.CurrentVersion=$$ver" -o agen ./cmd/app/ && sudo mkdir -p /usr/local/bin && sudo mv agen /usr/local/bin/agen
-	@rm -rf "$$HOME/.config/agenvoy/skills/.system" "$$HOME/.config/agenvoy/tools/.system"
+	@rm -rf "$$HOME/.config/agenvoy/skills/.system" "$$HOME/.config/agenvoy/tools/.system" "$$HOME/.config/agenvoy/vendor"
 	@mkdir -p "$$HOME/.config/agenvoy/skills/.system" "$$HOME/.config/agenvoy/tools/.system"
 	@[ -d extensions/skills ] && cp -R extensions/skills/. "$$HOME/.config/agenvoy/skills/.system/" || true
 	@[ -d extensions/scripts ] && cp -R extensions/scripts/. "$$HOME/.config/agenvoy/tools/.system/" || true
@@ -27,7 +27,7 @@ app:
 dev:
 	@$(MAKE) stop
 	@$(MAKE) build
-	@AGENVOY_PAGE_DIR=$(CURDIR)/page agen --enable-claude-code
+	@AGENVOY_PAGE_DIR=$(CURDIR)/page agen
 
 stop:
 	go run ./cmd/app/ stop

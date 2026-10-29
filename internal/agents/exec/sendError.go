@@ -19,7 +19,8 @@ func isSendTimeoutError(err error, sendCtxErr error) bool {
 		strings.Contains(s, "context deadline exceeded") ||
 		strings.Contains(s, "timeout awaiting response headers") ||
 		strings.Contains(s, "TLS handshake timeout") ||
-		strings.Contains(s, "i/o timeout") {
+		strings.Contains(s, "i/o timeout") ||
+		strings.Contains(s, "degenerate repetition") {
 		return true
 	}
 	return false

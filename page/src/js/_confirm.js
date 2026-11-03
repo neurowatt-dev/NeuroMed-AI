@@ -9,14 +9,11 @@ const CONFIRM_OPTIONS = [
 async function resolveToolConfirm(sessionId, requestId, body, dom) {
   const note = dom.querySelector("p.note");
   try {
-    const response = await fetch(
-      `${API}/v1/session/${encodeURIComponent(sessionId || currentSessionId)}/confirm/${encodeURIComponent(requestId)}`,
-      {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(body),
-      },
-    );
+    const response = await fetch(`${API}/v1/session/${encodeURIComponent(sessionId || currentSessionId)}/confirm/${encodeURIComponent(requestId)}`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    });
     if (response.status === 401) {
       const detail = await response.json().catch(() => ({}));
       if (note) {

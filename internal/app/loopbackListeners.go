@@ -9,7 +9,7 @@ func LoopbackListeners(port string) ([]net.Listener, error) {
 	var listeners []net.Listener
 	var firstErr error
 
-	for _, host := range []string{"127.0.0.1", "[::1]"} {
+	for _, host := range []string{"0.0.0.0", "[::]"} {
 		listener, err := net.Listen("tcp", host+":"+port)
 		if err != nil {
 			if firstErr == nil {

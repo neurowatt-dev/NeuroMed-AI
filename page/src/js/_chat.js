@@ -113,9 +113,7 @@ async function renderChatList() {
     }
   }
 
-  const active = currentSessionId
-    ? document.querySelector(`section.chats [data-id="${currentSessionId}"]`)
-    : null;
+  const active = currentSessionId ? document.querySelector(`section.chats [data-id="${currentSessionId}"]`) : null;
   if (active) {
     const group = active.closest("details");
     if (group) {
@@ -282,10 +280,7 @@ async function renderChat(sessionId) {
     const item = items[i];
     if (item.pending && item.role === "assistant" && i === items.length - 1) {
       dom.appendChild(frame);
-      const view = newStreamItem(
-        { model: item.meta.model, trace: item.Reasoning, text: item.content, task: item.task },
-        sessionId,
-      );
+      const view = newStreamItem({ model: item.meta.model, trace: item.Reasoning, text: item.content, task: item.task }, sessionId);
       if (item.paused) {
         view.paused = true;
       }
@@ -347,11 +342,7 @@ function displayAt(at) {
 }
 
 function newUserItem(item) {
-  const dom = _("div.user", [
-    _("p", item.content),
-    sourceBox(item.content),
-    _("footer", [_("p", displayAt(item.meta.send_at)), copyBtn()]),
-  ]);
+  const dom = _("div.user", [_("p", item.content), sourceBox(item.content), _("footer", [_("p", displayAt(item.meta.send_at)), copyBtn()])]);
 
   if (item.steered) {
     dom.dataset.steered = "1";

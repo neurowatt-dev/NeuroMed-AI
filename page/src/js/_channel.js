@@ -19,10 +19,7 @@ function tgHtmlToMarkdown(text) {
   );
   out = out.replace(/<pre>([\s\S]*?)<\/pre>/gi, (_m, body) => "\n```\n" + stripTags(body).trim() + "\n```\n");
   out = out.replace(/<code[^>]*>([\s\S]*?)<\/code>/gi, (_m, body) => "`" + body + "`");
-  out = out.replace(
-    /<a\s[^>]*href="([^"]*)"[^>]*>([\s\S]*?)<\/a>/gi,
-    (_m, href, body) => "[" + body + "](" + href + ")",
-  );
+  out = out.replace(/<a\s[^>]*href="([^"]*)"[^>]*>([\s\S]*?)<\/a>/gi, (_m, href, body) => "[" + body + "](" + href + ")");
   out = out.replace(/<(b|strong)>([\s\S]*?)<\/\1>/gi, (_m, _tag, body) => "**" + body + "**");
   out = out.replace(/<(i|em)>([\s\S]*?)<\/\1>/gi, (_m, _tag, body) => "*" + body + "*");
   out = out.replace(/<(s|strike|del)>([\s\S]*?)<\/\1>/gi, (_m, _tag, body) => "~~" + body + "~~");

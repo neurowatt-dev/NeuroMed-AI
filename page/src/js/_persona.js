@@ -27,16 +27,7 @@ async function openPersonaPopup(sessionId) {
   const save = _("button", { type: "button", class: "submit" }, "save");
 
   const root = _("div.popup", [
-    _("div.panel", [
-      _("strong", "Bot"),
-      _("p", "name"),
-      name.field,
-      _("p", "self id"),
-      self.field,
-      _("p", "role"),
-      role.field,
-      _("footer", [cancel, save]),
-    ]),
+    _("div.panel", [_("strong", "Bot"), _("p", "name"), name.field, _("p", "self id"), self.field, _("p", "role"), role.field, _("footer", [cancel, save])]),
   ]);
   root.id = "persona-popup";
 

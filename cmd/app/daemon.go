@@ -198,7 +198,7 @@ func Daemon() {
 
 	route := routes.New()
 	server := &http.Server{
-		Addr:    "127.0.0.1:" + filesystem.Port,
+		Addr:    "0.0.0.0:" + filesystem.Port,
 		Handler: route,
 	}
 

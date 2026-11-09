@@ -76,10 +76,6 @@
     }
   }
 
-  img[src$="logo-min.svg"] {
-    filter: invert(1) hue-rotate(180deg) brightness(1.15);
-  }
-
   body section.right-content section.chat {
     > main,
     > section,

@@ -1,5 +1,6 @@
 document.addEventListener("DOMContentLoaded", async function () {
   revealIconsWhenReady();
+  watchListSelection();
   watchServer();
 
   const config = readConfig();
@@ -372,7 +373,7 @@ document.addEventListener("DOMContentLoaded", async function () {
           setSession(params.chat);
           subscribe(params.chat);
           getModelList(params.chat, models);
-          getReasoningList(params.chat);
+          loadReasoning(params.chat);
           getRoleList();
           renderWorkDirMark();
           renderChat(params.chat);

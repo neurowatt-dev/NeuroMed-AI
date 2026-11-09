@@ -17,7 +17,7 @@ function subagentPanel(sessionId) {
   unpin.addEventListener("click", () => unpinSubagent(sessionId));
   return _("section", [
     _("header", [unpin]),
-    _("div.logo", [_("section", [_("img", { src: "public/logo-min.svg", alt: "Logo" }), _("p", "Agenvoy")])]),
+    _("div.logo", [_("section", [_("img", { src: "public/logo-min.svg", alt: "Logo" }), _("p", "NeuroTeam")])]),
     _("section.messages", [_("section.pending", { "data-index": "0" }), _("section.confirm")]),
   ]);
 }

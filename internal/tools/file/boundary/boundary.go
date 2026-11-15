@@ -45,6 +45,10 @@ func Grant(sessionID string, list ...string) {
 	}
 }
 
+func Revoke(sessionID string) {
+	cache.Delete(sessionID)
+}
+
 func isGranted(sessionID, absPath string) bool {
 	v, ok := cache.Load(sessionID)
 	if !ok {
@@ -71,10 +75,10 @@ func deniedErr(absPath string) error {
 
 func Resolve(sessionID, baseDir, path string) (string, error) {
 	abs, homeErr := go_pkg_filesystem.AbsPath(baseDir, path, go_pkg_filesystem.AbsPathOption{HomeOnly: true})
-	if homeErr == nil && IsDeniedPath(abs) {
+	if homeErr == nil && filesystem.IsDeniedPath(abs) {
 		return "", deniedErr(abs)
 	}
-	if homeErr == nil && !IsSensitivePath(abs) {
+	if homeErr == nil && !filesystem.IsSensitivePath(abs) {
 		return abs, nil
 	}
 
@@ -85,7 +89,7 @@ func Resolve(sessionID, baseDir, path string) (string, error) {
 		}
 		return "", rawErr
 	}
-	if IsDeniedPath(restricted) {
+	if filesystem.IsDeniedPath(restricted) {
 		return "", deniedErr(restricted)
 	}
 	if isGranted(sessionID, restricted) {
@@ -97,13 +101,21 @@ func Resolve(sessionID, baseDir, path string) (string, error) {
 	return "", utilsmsg.New(utilsmsg.Denied, "path", "%s holds credentials or key material; the user was not asked or did not approve this path, so retrying the same path fails the same way", restricted)
 }
 
+// NOTE: 針對唯讀的放行
+func ResolveRead(sessionID, baseDir, path string) (string, error) {
+	if abs, err := resolveRaw(baseDir, path); err == nil && filesystem.IsReadablePath(abs) {
+		return abs, nil
+	}
+	return Resolve(sessionID, baseDir, path)
+}
+
 func Restricted(sessionID, workDir, toolName, toolArgs string) []string {
 	list := rawPaths(toolName, toolArgs)
 	if len(list) == 0 {
 		return nil
 	}
 
-	base := baseDir(toolName, workDir)
+	base := baseDir(workDir)
 	seen := map[string]bool{}
 	var out []string
 	for _, one := range list {
@@ -115,10 +127,13 @@ func Restricted(sessionID, workDir, toolName, toolArgs string) []string {
 		if err != nil {
 			continue
 		}
-		if _, homeErr := go_pkg_filesystem.AbsPath(base, one, go_pkg_filesystem.AbsPathOption{HomeOnly: true}); homeErr == nil && !IsSensitivePath(abs) {
+		if _, homeErr := go_pkg_filesystem.AbsPath(base, one, go_pkg_filesystem.AbsPathOption{HomeOnly: true}); homeErr == nil && !filesystem.IsSensitivePath(abs) {
 			continue
 		}
-		if seen[abs] || IsDeniedPath(abs) || isGranted(sessionID, abs) {
+		if seen[abs] || filesystem.IsDeniedPath(abs) || isGranted(sessionID, abs) {
+			continue
+		}
+		if (toolName == "read_files" || toolName == "find_files") && filesystem.IsReadablePath(abs) {
 			continue
 		}
 
@@ -140,7 +155,7 @@ func WriteBinds(sessionID, baseDir string, list []string) ([]string, error) {
 			return nil, utilsmsg.New(utilsmsg.Invalid, "write_paths", "needs absolute paths, got %q", one)
 		}
 		if home, err := go_pkg_filesystem.AbsPath(baseDir, one, go_pkg_filesystem.AbsPathOption{HomeOnly: true}); err == nil {
-			if IsDeniedPath(home) {
+			if filesystem.IsDeniedPath(home) {
 				return nil, deniedErr(home)
 			}
 			continue
@@ -150,7 +165,7 @@ func WriteBinds(sessionID, baseDir string, list []string) ([]string, error) {
 		if err != nil {
 			return nil, utilsmsg.New(utilsmsg.Invalid, "write_paths", "%q: %w", one, err)
 		}
-		if IsDeniedPath(abs) {
+		if filesystem.IsDeniedPath(abs) {
 			return nil, deniedErr(abs)
 		}
 		if !isGranted(sessionID, abs) {
@@ -165,8 +180,8 @@ func WriteBinds(sessionID, baseDir string, list []string) ([]string, error) {
 	return out, nil
 }
 
-func baseDir(toolName, workDir string) string {
-	if toolName == "fetch_page" || strings.TrimSpace(workDir) == "" {
+func baseDir(workDir string) string {
+	if strings.TrimSpace(workDir) == "" {
 		return filesystem.DownloadDir
 	}
 	return workDir
@@ -189,7 +204,7 @@ func rawPaths(toolName, toolArgs string) []string {
 		}
 		return out
 
-	case "edit_file", "open_file":
+	case "edit_file", "remove_file", "restore_file", "open_file":
 		var p struct {
 			Path string `json:"path"`
 		}
@@ -225,22 +240,27 @@ func rawPaths(toolName, toolArgs string) []string {
 
 	case "run_command", "background_command":
 		var p struct {
+			Argv       []string `json:"argv"`
 			WritePaths []string `json:"write_paths"`
 		}
 		if json.Unmarshal([]byte(toolArgs), &p) != nil {
 			return nil
 		}
-		return p.WritePaths
+		return append(p.WritePaths, RemoveTargets(p.Argv)...)
 
-	case "fetch_page":
-		var p struct {
-			Save   bool   `json:"save"`
-			SaveTo string `json:"save_to"`
-		}
-		if json.Unmarshal([]byte(toolArgs), &p) != nil || !p.Save {
-			return nil
-		}
-		return []string{p.SaveTo}
 	}
 	return nil
+}
+
+func RemoveTargets(argv []string) []string {
+	if len(argv) < 2 || filepath.Base(argv[0]) != "rm" {
+		return nil
+	}
+	var list []string
+	for _, one := range argv[1:] {
+		if !strings.HasPrefix(one, "-") {
+			list = append(list, one)
+		}
+	}
+	return list
 }

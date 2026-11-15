@@ -54,6 +54,17 @@ func DeliverToFrom(ctx context.Context) string {
 	return sid
 }
 
+type subagentCtxKey struct{}
+
+func WithSubagent(ctx context.Context) context.Context {
+	return context.WithValue(ctx, subagentCtxKey{}, true)
+}
+
+func SubagentFrom(ctx context.Context) bool {
+	v, _ := ctx.Value(subagentCtxKey{}).(bool)
+	return v
+}
+
 type noPromptCtxKey struct{}
 
 func WithNoPrompt(ctx context.Context) context.Context {
@@ -62,6 +73,26 @@ func WithNoPrompt(ctx context.Context) context.Context {
 
 func NoPromptFrom(ctx context.Context) bool {
 	v, _ := ctx.Value(noPromptCtxKey{}).(bool)
+	return v
+}
+
+type AutoMode int
+
+const (
+	AutoModeOff AutoMode = 0
+	AutoModeOn  AutoMode = 1 << (iota - 1)
+	AutoModeAllowEdit
+	AutoModeSkipSandbox
+)
+
+type autoModeCtxKey struct{}
+
+func WithAutoMode(ctx context.Context, mode AutoMode) context.Context {
+	return context.WithValue(ctx, autoModeCtxKey{}, mode)
+}
+
+func AutoModeFrom(ctx context.Context) AutoMode {
+	v, _ := ctx.Value(autoModeCtxKey{}).(AutoMode)
 	return v
 }
 
@@ -94,7 +125,7 @@ func (a *ModelEntry) UnmarshalJSON(raw []byte) error {
 type Session struct {
 	ID               string
 	SystemPrompts    []go_llm_router.Message
-	Summary          go_llm_router.Message
+	SummaryData      map[string]any
 	TurnContext      go_llm_router.Message
 	UserMessage      go_llm_router.Message
 	ToolHistories    []go_llm_router.Message

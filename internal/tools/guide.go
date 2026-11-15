@@ -42,7 +42,7 @@ func registReasoningGuide() {
 - market_analysis: stock / ETF / market analysis or an entry decision.
 - targeted_read: a file question needing only some symbols, sections or keywords.
 - ask_user: missing target, vague scope or spec, ambiguous time, scheduling without content, more than one fitting tool.
-- subagent_dispatch: one lookup across 3+ entities, one question needing 2+ independently searched source classes, a discovered set needing per-entity work, or a named session ("call X" / "呼叫 X") — before subagents(mode=invoke) or background_subagents.
+- subagent_dispatch: one lookup across 3+ entities, one question needing 2+ independently searched source classes, a discovered set needing per-entity work, or a named session ("call X") — before subagents(mode=invoke) or background_subagents.
 - write_todo: analysis / research / evaluation, or work needing more than one round of tool calls — before the first tool call; an active Skill follows the Skill Execution Rules.
 - html_render: an HTML deliverable, before writing any markup.
 - office: creating or modifying .docx / .xlsx / .pptx, before writing the file.
@@ -54,12 +54,12 @@ func registReasoningGuide() {
 					"type":        "array",
 					"items":       map[string]any{"type": "string", "enum": topicNames},
 					"minItems":    1,
-					"description": "Every topic that matches this turn.",
+					"description": "Every topic that matches this turn, all in one call, e.g. ['web_search', 'write_todo'].",
 				},
 			},
 			"required": []string{"topics"},
 		},
-		Handler: func(_ context.Context, _ *tooltypes.Executor, args json.RawMessage) (string, error) {
+		Handler: func(_ context.Context, e *tooltypes.Executor, args json.RawMessage) (string, error) {
 			var params struct {
 				Topics []string `json:"topics"`
 			}
@@ -78,6 +78,16 @@ func registReasoningGuide() {
 				guide, ok := topicGuides[topic]
 				if !ok {
 					return "", utilsmsg.New(utilsmsg.Invalid, "topics", "unknown topic %q; available: %s", topic, strings.Join(topicNames, ", "))
+				}
+				if topic == "subagent_dispatch" && e != nil && e.ExcludeTools["subagents"] {
+					seen[topic] = true
+					guides = append(guides, "## "+topic+"\n\nThis session cannot dispatch: subagents and background_subagents are unavailable here. Run every lookup yourself with the tools you have, batching independent calls in one response.")
+					continue
+				}
+				if topic == "ask_user" && e != nil && e.ExcludeTools["ask_user"] {
+					seen[topic] = true
+					guides = append(guides, "## "+topic+"\n\nThis session has no user to ask: ask_user is unavailable here. Pick the most reasonable reading, proceed, and state the assumption in the reply.")
+					continue
 				}
 				if strings.Contains(guide, "{{.ModelSelection}}") {
 					if selection == "" {

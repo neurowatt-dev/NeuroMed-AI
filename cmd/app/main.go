@@ -7,6 +7,8 @@ import (
 	"os"
 	osexec "os/exec"
 	"os/signal"
+	"slices"
+	"strings"
 	"syscall"
 
 	go_pkg_sandbox "github.com/pardnchiu/go-pkg/sandbox"
@@ -33,6 +35,10 @@ func main() {
 			return
 
 		default:
+			if strings.HasPrefix(os.Args[1], "-") {
+				prompt(os.Args[1:])
+				return
+			}
 			usage()
 			os.Exit(1)
 		}
@@ -50,6 +56,13 @@ func usage() {
 	fmt.Println("Usage:")
 	fmt.Println("  agen                                            Attach TUI; spawn server daemon if not running")
 	fmt.Println("  agen stop                                       Stop the running server daemon")
+	fmt.Println("  agen -p <prompt> [flags]                        Send one prompt to the daemon and print the reply")
+	fmt.Println("      -m, --model <name>                          Model (default: auto)")
+	fmt.Println("      -r, --reasoning <level>                     Reasoning level (default: medium)")
+	fmt.Println("      --stream                                    Print the reply as it streams")
+	fmt.Println("      --work-dir <dir>                            Working directory (default: current directory)")
+	fmt.Println("      --allow-edit                                Allow writes and non-read-only commands")
+	fmt.Println("      --skip-sandbox                              DANGEROUS: leave the sandbox (paths outside $HOME, sudo, sandbox: false) with no confirmation; local only")
 	fmt.Println("  agen update                                     Update agen to the latest release")
 }
 
@@ -58,26 +71,34 @@ func stop() {
 		fmt.Fprintf(os.Stderr, "filesystem.Init: %v\n", err)
 		os.Exit(1)
 	}
-	r, err := runtime.Read()
-	if err != nil || r == nil {
-		fmt.Println("No daemon running.")
-		return
+	pids, err := runtime.ListDaemons()
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "runtime.ListDaemons: %v\n", err)
 	}
-	if !runtime.IsAlive(r.PID) {
-		fmt.Printf("Daemon record stale (pid=%d not alive); clearing.\n", r.PID)
+	if r, err := runtime.Read(); err == nil && r != nil && runtime.IsAlive(r.PID) && !slices.Contains(pids, r.PID) {
+		pids = append(pids, r.PID)
+	}
+	if len(pids) == 0 {
+		fmt.Println("No daemon running.")
 		_ = runtime.Clear()
 		return
 	}
-	fmt.Printf("Stopping daemon (pid=%d)...\n", r.PID)
-	if err := runtime.Stop(r.PID); err != nil {
-		fmt.Fprintf(os.Stderr, "runtime.Stop: %v\n", err)
-		os.Exit(1)
+	failed := false
+	for _, pid := range pids {
+		fmt.Printf("Stopping daemon (pid=%d)...\n", pid)
+		if err := runtime.Stop(pid); err != nil {
+			fmt.Fprintf(os.Stderr, "runtime.Stop: %v\n", err)
+			failed = true
+		}
 	}
 	if err := runtime.Clear(); err != nil {
 		slog.Warn("runtime.Clear",
 			slog.String("error", err.Error()))
 	}
-	fmt.Println("Daemon stopped.")
+	if failed {
+		os.Exit(1)
+	}
+	fmt.Printf("Stopped %d daemon(s).\n", len(pids))
 }
 
 func update() {

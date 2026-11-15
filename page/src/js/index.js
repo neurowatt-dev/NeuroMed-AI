@@ -365,6 +365,7 @@ document.addEventListener("DOMContentLoaded", async function () {
         bindCodeCopy();
         bindInputDrop();
         renderChatList();
+        markLeftTab(params);
 
         if (params.page === "chat") {
           if (!params.chat) {

@@ -183,17 +183,14 @@ var ChatCompletionsSystemPrompt string
 //go:embed prompts/system_prompt/default_rule.md
 var DefaultRule string
 
-//go:embed prompts/system_prompt/inject/permission/always_allow.md
-var PermissionAlwaysAllow string
-
-//go:embed prompts/system_prompt/inject/permission/single_confirm.md
-var PermissionSingleConfirm string
-
 //go:embed prompts/system_prompt/subagent.md
 var SubagentPrompt string
 
 //go:embed prompts/system_prompt/component/wsl_host.md
 var WSLHost string
+
+//go:embed prompts/system_prompt/component/plain_text.md
+var PlainTextRule string
 
 // * Prompts > systemPrompt > Chatbot
 
@@ -231,6 +228,9 @@ var InjectSkills string
 
 //go:embed prompts/system_prompt/inject/turn_context/tool_gap.md
 var InjectToolGap string
+
+//go:embed prompts/system_prompt/inject/turn_context/background.md
+var InjectBackground string
 
 //go:embed prompts/system_prompt/inject/turn_context/agent_guide.md
 var InjectAgentGuide string
@@ -272,9 +272,6 @@ var GuideFigure string
 
 // * Configs
 
-//go:embed jsons/sensitive_path.json
-var SensitivePath []byte
-
 //go:embed jsons/exclude_list.json
 var ExcludeList []byte
 
@@ -295,6 +292,9 @@ var GuardrailRules []byte
 
 //go:embed jsons/refusal_messages.json
 var RefusalMessages []byte
+
+//go:embed jsons/secret_patterns.json
+var SecretPatterns []byte
 
 // * Official Guide
 

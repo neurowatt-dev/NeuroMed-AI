@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"regexp"
 	"runtime"
@@ -12,6 +13,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"syscall"
 	"time"
 
 	go_pkg_sandbox "github.com/pardnchiu/go-pkg/sandbox"
@@ -23,6 +25,7 @@ import (
 	toolregister "github.com/pardnchiu/agenvoy/internal/tools/register"
 	tooltypes "github.com/pardnchiu/agenvoy/internal/tools/types"
 	utilsmsg "github.com/pardnchiu/agenvoy/internal/utils/msg"
+	"github.com/pardnchiu/agenvoy/internal/utils/secret"
 )
 
 func registRunCommand() {
@@ -32,10 +35,9 @@ func registRunCommand() {
 		SystemUse:   false,
 		AlwaysAllow: false,
 		Concurrent:  false,
-		Description: fmt.Sprintf(`Runs one binary in the work directory and returns its combined stdout/stderr once it exits. Networking is off unless network: true, which always asks: git clone / fetch / pull / push, package installs, go mod download, curl and wget fail to resolve a host without it.
-Use for 跑一下 / 執行 / build / test / lint / format and local git work.
-A watcher (--watch, chokidar, npm run sass/build/dev), a job likely over %d minutes or 背景跑 / 跑完告訴我 → background_command; cat / head / tail → read_files; ls / find / grep / rg → find_files; a URL → fetch_page or http_request; %s; open in an app → open_file.
-Inspection only (git status / log / diff, du, which, docker ps, git config --list, --version) runs without asking, matched against a read-only allowlist by binary plus up to two subcommands; anything else asks, so never chain one behind && with a command that writes.`, configs.BACKGROUND_THRESHOLD_MIN, systemPackageRoute),
+		Description: fmt.Sprintf(`Runs one binary in the work directory and returns its combined stdout/stderr once it exits; networking is off unless network: true, and rm moves its targets to the trash instead of deleting them.
+Use for "run this", "build it", "run the tests", "lint / format the code", and local git work such as commit, branch or merge.
+A watcher (--watch, chokidar, npm run sass/build/dev), a job likely over %d minutes, or "run it in the background" / "tell me when it's done" → background_command; cat / head / tail → read_files; ls / find / grep / rg → find_files; a URL → fetch_page or http_request; %s; opening a file or link in an app → open_file.`, configs.BACKGROUND_THRESHOLD_MIN, systemPackageRoute),
 		Parameters: map[string]any{
 			"type":       "object",
 			"properties": commandProperties(),
@@ -46,7 +48,7 @@ Inspection only (git status / log / diff, du, which, docker ps, git config --lis
 			if err := json.Unmarshal(args, &params); err != nil {
 				return "", utilsmsg.Wrap(utilsmsg.Invalid, "json.Unmarshal", "", err)
 			}
-			return runCommand(ctx, e, params.Argv, params.WritePaths, params.Network, params.unsandboxed(), false, 0, nil)
+			return runCommand(ctx, e, params.Argv, params.WritePaths, params.Network, params.unsandboxed(), nil)
 		},
 	})
 }
@@ -66,22 +68,22 @@ func commandProperties() map[string]any {
 	return map[string]any{
 		"argv": map[string]any{
 			"type":        "array",
-			"description": "The command as an argv array — ['git','status'], ['go','test','./...']. A single pipeline or redirect needs ['sh','-c','<full command>']; without a shell metacharacter (| && > * ~) it is called directly, never wrapped in sh -c. A multi-line script goes in a file you write first, then run that file. When the request names a capability rather than an exact command, resolve which binary is installed before running one: a single ['sh','-c','command -v <every candidate>'] prints only those that exist. Guessing the most common name costs one round trip per guess and the failure reads as 'command not found', not as 'wrong binary'.",
+			"description": "The command as an argv array; the first item is a bare binary name, not a path: ['git','status'], ['go','test','./...'].\n- Pipe, redirect, glob, ~ or && → ['sh','-c','<full command>']; otherwise call the binary directly. Inside sh -c, command names are literal (no $VAR or $(...) in command position); rm and sudo are refused there.\n- Script file, including a multi-line script you write first → ['sh','<file>'], or sh <file> inside sh -c; ./<file> is refused like any path in command position.\n- cd is refused → absolute paths, or ['sh','-c','cd <dir> && <command>'].\n- Root → ['sudo','<binary>', ...]: no sudo flags, no nested sudo or su; runs outside the sandbox.\n- Read-only inspection (git status / log / diff, du, which, docker ps, --version) goes in its own call, never chained with && to a command that writes, so it matches the read-only allowlist and skips confirmation.\n- A capability rather than an exact binary → first ['sh','-c','command -v <every candidate>'], which prints only the installed ones, instead of guessing one name per call.\n- A key or token in a file or the keychain → read and use it in the same command, never read it out first, since secrets in tool output come back as ********: ['sh','-c','set -a; . ./.env; set +a; curl -H \"Authorization: Bearer $API_TOKEN\" <url>'], or $(security find-generic-password -s agenvoy -a <KEY> -w) as an argument.",
 			"items":       map[string]any{"type": "string"},
 			"minItems":    1,
 		},
 		"network": map[string]any{
 			"type":        "boolean",
-			"description": "Set true when the command has to reach a host — git clone / fetch / pull / push, npm or pnpm or yarn install, pip install, go mod download, cargo fetch, curl. The sandbox keeps networking off until this is set, and setting it always raises a confirmation, so leave it out for anything that only touches local files.",
+			"description": "true when the command has to reach a host: git clone / fetch / pull / push, npm / pnpm / yarn / pip install, go mod download, cargo fetch, curl, wget. Without it these fail to resolve the host; leave it out for anything that only touches local files.",
 		},
 		"write_paths": map[string]any{
 			"type":        "array",
-			"description": "Absolute paths outside $HOME this command has to write to — ['/usr/local'] for a system install. The sandbox only allows writes under $HOME, so a command touching anything else fails with a permission error that looks like a file ownership problem and is not one. Each path needs the user's approval on this call. Paths under $HOME need not be listed. A path still denied after approval is root-owned: re-run with argv ['sudo', ...] instead.",
+			"description": "Absolute paths outside $HOME this command writes to, e.g. ['/usr/local'] for a system install; paths under $HOME are always writable and need not be listed. The sandbox only allows writes under $HOME, so a missing entry fails with a permission error that looks like file ownership and is not one: list the path here instead of running chown or chmod. A path still denied while listed is root-owned → argv ['sudo', ...]. Ignored when argv starts with sudo.",
 			"items":       map[string]any{"type": "string"},
 		},
 		"sandbox": map[string]any{
 			"type":        "boolean",
-			"description": "false runs the command outside the sandbox with the user's full permissions; network and write_paths are then ignored. Only after the sandbox has blocked this exact command with a permission error the user cannot fix through network or write_paths (diskutil -69863, operation not permitted on a system service). Every false call asks the user for the system password, and allow rules never skip that prompt. Root privileges → argv ['sudo', '<binary>', ...] (no sudo flags), which asks the same password and runs it outside the sandbox. Homebrew (brew install / upgrade / uninstall) runs its own sandbox, which cannot nest: pass false, never sudo.",
+			"description": "false runs the command outside the sandbox with the user's full permissions; network and write_paths are then ignored. Use it only after the sandbox blocked this exact command with an error network or write_paths cannot fix (diskutil -69863, operation not permitted on a system service); a root-owned target needs argv ['sudo', ...] instead. Homebrew (brew install / upgrade / uninstall) runs its own sandbox, which cannot nest: pass false, never sudo.",
 			"default":     true,
 		},
 	}
@@ -118,9 +120,13 @@ var errOpenCommand = utilsmsg.New(utilsmsg.Denied, "open", "the sandbox has no r
 
 const systemPackageRoute = "a system package → the package manager named on the Host OS line: argv ['sudo', '<manager>', ...] (e.g. ['sudo', 'apt-get', 'install', '-y', '<pkg>']), or ['brew', 'install', '<pkg>'] with sandbox: false and never sudo; only when Host OS names none, find it with command -v"
 
-func runCommand(ctx context.Context, e *tooltypes.Executor, argv, writePaths []string, network, unsandboxed, background bool, timeoutMin int, watch *watchSpec) (string, error) {
+func runCommand(ctx context.Context, e *tooltypes.Executor, argv, writePaths []string, network, unsandboxed bool, background *backgroundSpec) (string, error) {
 	if len(argv) == 0 {
 		return "", utilsmsg.New(utilsmsg.Invalid, "argv", "requires a non-empty array, e.g. [\"git\", \"status\"]")
+	}
+
+	if masked := secret.FindMasked(strings.Join(argv, "\n")); masked != "" {
+		return "", utilsmsg.New(utilsmsg.Invalid, "argv", "contains %q, a redacted value from a tool result, not the real text; read the original inside this command (e.g. . ./.env, security find-generic-password) instead", masked)
 	}
 
 	binary := filepath.Base(argv[0])
@@ -163,7 +169,7 @@ func runCommand(ctx context.Context, e *tooltypes.Executor, argv, writePaths []s
 		}
 	}
 
-	if !background {
+	if background == nil {
 		if err := checkWatchArgs(argv, e.WorkDir, 0, map[string]bool{}); err != nil {
 			return "", err
 		}
@@ -187,8 +193,8 @@ func runCommand(ctx context.Context, e *tooltypes.Executor, argv, writePaths []s
 		sandboxOpt = &go_pkg_sandbox.Option{AllowAll: true}
 	}
 
-	if background {
-		return startBackgroundCommand(ctx, e, argv, binds, sandboxOpt, timeoutMin, watch)
+	if background != nil {
+		return startBackgroundCommand(ctx, e, argv, binds, sandboxOpt, background)
 	}
 
 	ctx, cancel := context.WithTimeout(ctx, configs.RUN_COMMAND_TIMEOUT)
@@ -198,8 +204,9 @@ func runCommand(ctx context.Context, e *tooltypes.Executor, argv, writePaths []s
 	if err != nil {
 		return "", utilsmsg.Wrap(utilsmsg.Internal, "go_pkg_sandbox.Wrap", "", err)
 	}
+	relaySudoCancel(cmd, argv)
 
-	sink := &progressWriter{send: tooltypes.Progress(ctx)}
+	sink := &progressWriter{send: tooltypes.Progress(ctx), redact: secret.Stream()}
 	cmd.Stdout = sink
 	cmd.Stderr = sink
 
@@ -217,12 +224,23 @@ func runCommand(ctx context.Context, e *tooltypes.Executor, argv, writePaths []s
 
 const progressInterval = 500 * time.Millisecond
 
+func relaySudoCancel(cmd *exec.Cmd, argv []string) {
+	if argv[0] != "sudo" {
+		return
+	}
+	cmd.Cancel = func() error {
+		return cmd.Process.Signal(syscall.SIGTERM)
+	}
+}
+
 type progressWriter struct {
 	mu      sync.Mutex
 	buf     strings.Builder
 	pending strings.Builder
 	last    time.Time
 	send    func(string)
+	redact  func(string) string
+	carry   string
 }
 
 func (w *progressWriter) Write(raw []byte) (int, error) {
@@ -230,7 +248,10 @@ func (w *progressWriter) Write(raw []byte) (int, error) {
 	defer w.mu.Unlock()
 
 	w.buf.Write(raw)
-	w.pending.Write(raw)
+	data := w.carry + string(raw)
+	cut := strings.LastIndexAny(data, "\r\n") + 1
+	w.carry = data[cut:]
+	w.pending.WriteString(w.redact(data[:cut]))
 
 	if time.Since(w.last) < progressInterval {
 		return len(raw), nil
@@ -263,7 +284,11 @@ const sandboxWriteAdvice = `
 
 const sandboxEscalateAdvice = `
 
-[agenvoy] the sandbox blocked this command (a socket, device, system service or path outside its rules). Re-run this exact command now with sandbox: false; its confirmation asks the user for the system password, and that prompt is the permission request, so do not stop to ask in text first. A root-owned target needs argv ['sudo', ...] instead. Report only if the user declines.`
+[agenvoy] the output reports a permission error; the sandbox may have caused it. Leaving the sandbox is the last resort, not the default retry:
+- a connection or auth failure (e.g. Permission denied (publickey), could not resolve host) → network: true, or report the credential problem; sandbox: false does not fix it
+- a write → a path under the work directory, or write_paths for the path that failed
+- the task genuinely needs a system socket, device or service, or a root-owned target → sandbox: false or argv ['sudo', ...]; the user approves it with the system password
+Otherwise report what was blocked and stop.`
 
 var permissionMarkers = []string{
 	"not writable", "permission denied", "operation not permitted",

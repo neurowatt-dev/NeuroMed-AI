@@ -109,6 +109,8 @@ func Exec(ctx context.Context, task, sessionID, modelName, reasoning, systemProm
 		"subagents",
 		"background_subagents",
 		"edit_file",
+		"remove_file",
+		"restore_file",
 		"edit_tool",
 		"test_tool",
 		"edit_skill",
@@ -151,7 +153,7 @@ func Exec(ctx context.Context, task, sessionID, modelName, reasoning, systemProm
 		TaskHash:          hash,
 		KeepPending:       true,
 		IgnoreHistory:     ignoreHistory,
-		Task:              trimTask,
+		InputNoRecord:     trimTask,
 		Input:             trimTask,
 		ExcludeTools:      toolExclude,
 		ExcludeSkills:     tools.TUIOnlySkills,
@@ -199,7 +201,7 @@ func Exec(ctx context.Context, task, sessionID, modelName, reasoning, systemProm
 				errCh <- utilsmsg.New(utilsmsg.Internal, "subagent", "panic: %v", r)
 			}
 		}()
-		errCh <- exec.Run(subCtx, taskMeta, events, true)
+		errCh <- exec.Run(agentstypes.WithSubagent(subCtx), taskMeta, events, true)
 	}()
 
 	// * step 10: collect events

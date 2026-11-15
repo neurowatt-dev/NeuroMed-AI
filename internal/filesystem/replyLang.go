@@ -93,7 +93,11 @@ func ReplyLangDirective() string {
 	if !ok {
 		one = replyLangEntry{Name: code}
 	}
-	return one.Name + " by default." + one.Note + " The operator set this default, so the language the user writes in does not change it. When the current request asks for another language (\"英文\", \"in English\", \"日本語で\") or a skill, template or tool in use fixes the output's language (a bilingual commit message, an English-only field), follow that for the output it covers and keep the rest in " + one.Name + ". Otherwise no mixing."
+	name := one.Name
+	if one.Note != "" {
+		name += " (" + one.Note + ")"
+	}
+	return name + " by default, whatever language the user writes in. Use another language only for output the current request asks for in it or that a skill, template or tool fixes (a bilingual commit message, an English-only field); keep the rest in " + one.Name + ", without mixing."
 }
 
 const (
@@ -124,18 +128,22 @@ func ApplyReplyLang(template string) string {
 
 var langRefusal = getLangRefusal()
 
-func getLangRefusal() map[string]string {
-	var dic map[string]string
+func getLangRefusal() map[string]map[string]string {
+	var dic map[string]map[string]string
 	if err := json.Unmarshal(configs.RefusalMessages, &dic); err != nil {
-		slog.Warn("embedded poison_refusal",
+		slog.Warn("[Internal] refusal_messages: embedded JSON cannot be parsed",
 			slog.String("error", err.Error()))
 	}
 	return dic
 }
 
-func RefusalMessage() string {
-	if text, ok := langRefusal[CanonicalReplyLang(ConfigReplyLang)]; ok {
+func RefusalMessage(rule string) string {
+	dic, ok := langRefusal[rule]
+	if !ok {
+		dic = langRefusal["default"]
+	}
+	if text, ok := dic[CanonicalReplyLang(ConfigReplyLang)]; ok {
 		return text
 	}
-	return langRefusal["en"]
+	return dic["en"]
 }

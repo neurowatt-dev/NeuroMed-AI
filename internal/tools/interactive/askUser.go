@@ -81,7 +81,6 @@ type pendingMeta struct {
 	Files        []string              `json:"files,omitempty"`
 	Reply        string                `json:"reply,omitempty"`
 	AllowAll     bool                  `json:"allow_all,omitempty"`
-	Background   []BackgroundTask      `json:"background,omitempty"`
 	WindowHash   string                `json:"window_hash,omitempty"`
 }
 
@@ -100,9 +99,9 @@ func registAskUser() {
 		SystemUse:   true,
 		AlwaysAllow: true,
 		Concurrent:  false,
-		Description: `Asks the user one or more questions and stops the run; a new turn resumes automatically with their answers.
-Use when the target, scope, format or timing is not fixed by what they said, an active Skill's SKILL.md, or data a tool can fetch (git state, files), or when more than one tool fits. A bare /<skill> command is fully specified by its SKILL.md: run it without asking.
-Credentials → store_secret.`,
+		Description: `Asks the user one or more questions; the answers come back as this call's result, or, on channels that cannot wait, the run ends here and a new turn resumes from state with them.
+Use for requests whose target, scope, format or timing is not fixed by what they said, an active Skill's SKILL.md, or data a tool can fetch (git state, files), e.g. "remind me later", "clean up the project", "write me a report"; and when more than one tool fits. A bare /<skill> command is fully specified by its SKILL.md: run it without asking.
+API keys, tokens and passwords → store_secret.`,
 		Parameters: map[string]any{
 			"type": "object",
 			"properties": map[string]any{
@@ -133,7 +132,7 @@ Credentials → store_secret.`,
 							},
 							"secret": map[string]any{
 								"type":        "boolean",
-								"description": "Free text only: true masks the input and keeps the answer out of logs.",
+								"description": "Free text only (ignored with options): true masks the input; the answer still comes back to you, so credentials go through store_secret instead.",
 								"default":     false,
 							},
 						},
@@ -142,7 +141,7 @@ Credentials → store_secret.`,
 				},
 				"state": map[string]any{
 					"type":        "object",
-					"description": "What the resumed turn needs to continue, since this run stops here.",
+					"description": "What a resumed turn needs to continue if the run ends here; objective and next_steps must be non-empty.",
 					"properties": map[string]any{
 						"objective": map[string]any{
 							"type":        "string",
@@ -151,7 +150,7 @@ Credentials → store_secret.`,
 						"completed": map[string]any{
 							"type":        "array",
 							"items":       map[string]any{"type": "string"},
-							"description": "Steps already done, each with its key result.",
+							"description": "Steps already done, each with its key result; [] when nothing is done yet.",
 						},
 						"next_steps": map[string]any{
 							"type":        "array",
@@ -195,6 +194,10 @@ Credentials → store_secret.`,
 					MultiSelect: q.MultiSelect,
 					Secret:      q.Secret,
 				})
+			}
+
+			if agenttypes.AutoModeFrom(ctx) != agenttypes.AutoModeOff {
+				return "No user is available in auto mode, so the question was not asked. Decide with your best judgment, state the assumption you made in the reply, and continue.", nil
 			}
 
 			answers, err := AskPrompt(ctx, e.SessionID, questions)
@@ -295,25 +298,42 @@ func DeletePending(sessionID, taskHash string) {
 		return
 	}
 	pendingMu.Lock()
-	path := filesystem.PendingMetaPath(sessionID, taskHash)
-	if running, unreported := BackgroundState(sessionID, taskHash); running+unreported > 0 {
-		meta, err := readPending(path)
-		pendingMu.Unlock()
-		if err == nil {
-			resumeUnreported(sessionID, taskHash, meta.Background)
-		}
-		return
-	}
-	os.Remove(path)
+	os.Remove(filesystem.PendingMetaPath(sessionID, taskHash))
 	pendingMu.Unlock()
+	SettleBackground(sessionID, taskHash)
 }
 
-func resumeUnreported(sessionID, taskHash string, list []BackgroundTask) {
-	finished, running := backgroundToReport(list)
-	if running > 0 || len(finished) == 0 || backgroundResume == nil {
+const (
+	canceledReply = "[Canceled]: canceled by user before it finished"
+	PendingFlag   = "[Saved to /pending]:"
+)
+
+func CancelPending(sessionID, taskHash string) {
+	if taskHash == "" {
 		return
 	}
-	backgroundResume(sessionID, taskHash, finished[0].WorkDir)
+	pendingMu.Lock()
+
+	meta, err := readPending(filesystem.PendingMetaPath(sessionID, taskHash))
+	if err != nil {
+		pendingMu.Unlock()
+		return
+	}
+
+	reply := strings.TrimSpace(meta.Reply)
+	if rest, failed := strings.CutPrefix(reply, PendingFlag); failed || reply == "" {
+		meta.Reply = canceledReply
+		if failed {
+			meta.Reply += "; last error: " + strings.TrimSpace(rest)
+		}
+		if writeErr := writePending(sessionID, taskHash, &meta); writeErr != nil {
+			slog.Debug("CancelPending",
+				slog.String("session", sessionID),
+				slog.String("error", writeErr.Error()))
+		}
+	}
+	pendingMu.Unlock()
+	CleanupPending(sessionID, taskHash)
 }
 
 func CompactPending(sessionID, taskHash string) {
@@ -355,23 +375,7 @@ func CleanupPending(sessionID, taskHash string) {
 		return
 	}
 	src := filesystem.PendingMetaPath(sessionID, taskHash)
-	if running, unreported := BackgroundState(sessionID, taskHash); running+unreported > 0 {
-		pendingMu.Lock()
-		meta, err := readPending(src)
-		if err == nil && len(meta.Questions) > 0 {
-			meta.Questions = nil
-			if err := writePending(sessionID, taskHash, &meta); err != nil {
-				slog.Warn("CleanupPending writePending",
-					slog.String("file", src),
-					slog.String("error", err.Error()))
-			}
-		}
-		pendingMu.Unlock()
-		if err == nil {
-			resumeUnreported(sessionID, taskHash, meta.Background)
-		}
-		return
-	}
+	defer SettleBackground(sessionID, taskHash)
 	CompactPending(sessionID, taskHash)
 
 	if !go_pkg_filesystem_reader.Exists(src) {
@@ -602,13 +606,9 @@ func LoadResumeMessage(sessionID, taskHash string, answers []any) (full string, 
 
 	var msg strings.Builder
 
-	finished, running := backgroundToReport(meta.Background)
-	backgroundOnly := len(meta.Questions) == 0 && len(finished) > 0
+	finished, running := backgroundToReport(parentLegs(sessionID, taskHash))
 	if len(meta.Questions) > 0 {
 		msg.WriteString("[Resumed Task — ask_user response received]\n\n")
-	} else if len(finished) > 0 {
-		msg.WriteString(backgroundResumeHeader(finished))
-		msg.WriteString("\n\n")
 	} else {
 		msg.WriteString("[Resumed Task — interrupted execution recovered]\n\n")
 	}
@@ -761,11 +761,6 @@ func LoadResumeMessage(sessionID, taskHash string, answers []any) (full string, 
 	}
 
 	stageBackgroundReport(sessionID, taskHash, sb.String(), finished)
-	if backgroundOnly {
-		report := strings.TrimSpace(sb.String())
-		header, section, _ := strings.Cut(report, "\n")
-		return header + "\n\n## Objective\n" + strings.TrimSpace(meta.Objective) + "\n" + section, report, nil
-	}
 	return msg.String(), sb.String(), nil
 }
 
@@ -793,13 +788,11 @@ func SaveAndEnqueueAskUser(sessionID, origin, deliverTo string, questions []runt
 	var allResults []ToolResult
 	var messageID, model, reasoning string
 	var allowAll bool
-	var background []BackgroundTask
 	var windowHash string
 	taskObjective := objective
 	allFiles := files
 	if existing, err := readPending(filesystem.PendingMetaPath(sessionID, taskHash)); err == nil {
 		allowAll = existing.AllowAll
-		background = existing.Background
 		windowHash = existing.WindowHash
 		if strings.TrimSpace(existing.Objective) != "" {
 			taskObjective = existing.Objective
@@ -837,7 +830,6 @@ func SaveAndEnqueueAskUser(sessionID, origin, deliverTo string, questions []runt
 		Files:        allFiles,
 		ToolResults:  allResults,
 		AllowAll:     allowAll,
-		Background:   background,
 		WindowHash:   windowHash,
 	}); err != nil {
 		slog.Warn("SaveAndEnqueueAskUser: writePending", slog.String("error", err.Error()))

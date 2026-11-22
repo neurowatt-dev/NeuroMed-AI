@@ -81,6 +81,7 @@ type pendingMeta struct {
 	Files        []string              `json:"files,omitempty"`
 	Reply        string                `json:"reply,omitempty"`
 	AllowAll     bool                  `json:"allow_all,omitempty"`
+	AllowTurn    bool                  `json:"allow_turn,omitempty"`
 	WindowHash   string                `json:"window_hash,omitempty"`
 }
 
@@ -98,7 +99,6 @@ func registAskUser() {
 		Timeout:     toolregister.NoToolTimeout,
 		SystemUse:   true,
 		AlwaysAllow: true,
-		Concurrent:  false,
 		Description: `Asks the user one or more questions; the answers come back as this call's result, or, on channels that cannot wait, the run ends here and a new turn resumes from state with them.
 Use for requests whose target, scope, format or timing is not fixed by what they said, an active Skill's SKILL.md, or data a tool can fetch (git state, files), e.g. "remind me later", "clean up the project", "write me a report"; and when more than one tool fits. A bare /<skill> command is fully specified by its SKILL.md: run it without asking.
 API keys, tokens and passwords → store_secret.`,
@@ -444,6 +444,33 @@ func LoadPendingAllowAll(sessionID, taskHash string) bool {
 	return meta.AllowAll
 }
 
+func LoadPendingAllowTurn(sessionID, taskHash string) bool {
+	if taskHash == "" {
+		return false
+	}
+	meta, err := readPending(filesystem.PendingMetaPath(sessionID, taskHash))
+	if err != nil {
+		return false
+	}
+	return meta.AllowTurn
+}
+
+func SetPendingAllowTurn(sessionID, taskHash string) {
+	if sessionID == "" || taskHash == "" {
+		return
+	}
+	pendingMu.Lock()
+	defer pendingMu.Unlock()
+	meta, err := readPending(filesystem.PendingMetaPath(sessionID, taskHash))
+	if err != nil || meta.AllowTurn {
+		return
+	}
+	meta.AllowTurn = true
+	if err := writePending(sessionID, taskHash, &meta); err != nil {
+		slog.Warn("SetPendingAllowTurn", slog.String("session", sessionID), slog.String("error", err.Error()))
+	}
+}
+
 func LoadPendingMessageID(sessionID, taskHash string) string {
 	if taskHash == "" {
 		return ""
@@ -787,12 +814,13 @@ func SaveAndEnqueueAskUser(sessionID, origin, deliverTo string, questions []runt
 	pendingMu.Lock()
 	var allResults []ToolResult
 	var messageID, model, reasoning string
-	var allowAll bool
+	var allowAll, allowTurn bool
 	var windowHash string
 	taskObjective := objective
 	allFiles := files
 	if existing, err := readPending(filesystem.PendingMetaPath(sessionID, taskHash)); err == nil {
 		allowAll = existing.AllowAll
+		allowTurn = existing.AllowTurn
 		windowHash = existing.WindowHash
 		if strings.TrimSpace(existing.Objective) != "" {
 			taskObjective = existing.Objective
@@ -830,12 +858,32 @@ func SaveAndEnqueueAskUser(sessionID, origin, deliverTo string, questions []runt
 		Files:        allFiles,
 		ToolResults:  allResults,
 		AllowAll:     allowAll,
+		AllowTurn:    allowTurn,
 		WindowHash:   windowHash,
 	}); err != nil {
 		slog.Warn("SaveAndEnqueueAskUser: writePending", slog.String("error", err.Error()))
 	}
 	pendingMu.Unlock()
 
+	if err := enqueueAskUser(sessionID, origin, deliverTo, taskHash, questions); err != nil {
+		slog.Warn("SaveAndEnqueueAskUser: AskAsync", slog.String("error", err.Error()))
+	}
+
+	return taskHash
+}
+
+func ReenqueueAskUser(sessionID, origin, taskHash string) error {
+	questions, err := LoadPendingQuestions(sessionID, taskHash)
+	if err != nil {
+		return err
+	}
+	if len(questions) == 0 {
+		return utilsmsg.New(utilsmsg.NotFound, "pending questions", "%q", taskHash)
+	}
+	return enqueueAskUser(sessionID, origin, sessionID, taskHash, questions)
+}
+
+func enqueueAskUser(sessionID, origin, deliverTo, taskHash string, questions []runtime.Question) error {
 	onResolve := func(reply runtime.Reply) {
 		if reply.Error != nil {
 			slog.Warn("ask_user async resolve error",
@@ -851,7 +899,7 @@ func SaveAndEnqueueAskUser(sessionID, origin, deliverTo string, questions []runt
 		runtime.TriggerResume(sessionID, taskHash, reply.Answers)
 	}
 
-	if _, err := runtime.AskUser(runtime.Request{
+	_, err := runtime.AskUser(runtime.Request{
 		Kind:      runtime.KindAskUser,
 		SessionID: sessionID,
 		TaskHash:  taskHash,
@@ -859,11 +907,8 @@ func SaveAndEnqueueAskUser(sessionID, origin, deliverTo string, questions []runt
 		DeliverTo: deliverTo,
 		ToolName:  "ask_user",
 		AskUser:   &runtime.UserPayload{Questions: questions},
-	}, onResolve); err != nil {
-		slog.Warn("SaveAndEnqueueAskUser: AskAsync", slog.String("error", err.Error()))
-	}
-
-	return taskHash
+	}, onResolve)
+	return err
 }
 
 func AskPrompt(ctx context.Context, sessionID string, questions []runtime.Question) ([]any, error) {

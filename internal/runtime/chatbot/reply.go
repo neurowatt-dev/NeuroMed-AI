@@ -88,9 +88,6 @@ func (r Reply) deliver(events <-chan agentstypes.Event, wait func() error) error
 
 	text, paths := utils.ExtractFileMarkers(text)
 	if r.Channel == Telegram {
-		if r.ReplyTo != "" {
-			text = "\u200b\n" + text
-		}
 		text = SanitizeTelegramHTML(text)
 	}
 

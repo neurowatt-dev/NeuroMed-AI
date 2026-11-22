@@ -118,6 +118,50 @@ async function renderSystem() {
 
 }
 
+async function systemUpdateInfo() {
+  try {
+    const response = await fetch(`${API}/v1/system/update`);
+    const detail = (await response.json().catch(() => ({}))) || {};
+    return { ok: response.ok, ...detail };
+  } catch (err) {
+    console.error("systemUpdateInfo", err);
+    return { ok: false };
+  }
+}
+
+function renderUpdateEntry(available, latest) {
+  const entry = $("#left-tab-update");
+  if (!entry) {
+    return;
+  }
+
+  entry.hidden = !available;
+  entry.href = latest ? RELEASE_TAG_URL + encodeURIComponent(latest) : RELEASE_URL;
+  const label = latest ? `See update (${latest})` : "See update";
+  const text = entry.querySelector("p");
+  if (text) {
+    text.textContent = label;
+  }
+  entry.setAttribute("name", label);
+}
+
+function hasNewVersion(detail) {
+  return Boolean(detail.ok && detail.version && detail.latest && detail.version !== detail.latest);
+}
+
+async function checkUpdate() {
+  const detail = await systemUpdateInfo();
+  renderUpdateEntry(hasNewVersion(detail), detail.latest);
+}
+
+function watchUpdate() {
+  checkUpdate();
+  setInterval(checkUpdate, UPDATE_INTERVAL);
+}
+
+const RELEASE_URL = "https://github.com/agenvoy/Agenvoy/releases";
+const RELEASE_TAG_URL = `${RELEASE_URL}/tag/`;
+
 async function runSystemUpdate() {
   if (!confirm("Install the latest release?\nThis overwrites the installed binary.")) {
     return;

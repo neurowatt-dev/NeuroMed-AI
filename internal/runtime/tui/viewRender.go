@@ -563,15 +563,7 @@ func renderAgentEvent(ev agenttypes.Event, sessionLabel, cwd string, width int, 
 		return hintStyle.Render("⏵ " + srcPrefix + "Compact(" + target + ")"), true
 
 	case agenttypes.EventDone:
-		stats := utils.FormatEventFooter(ev.Duration, ev.OutputElapsed, "", "", ev.Usage)
-		if finishedAt != "" {
-			if stats != "" {
-				stats += "  " + finishedAt
-			} else {
-				stats = finishedAt
-			}
-		}
-		footer := stats
+		footer := utils.FormatEventFooter(ev.Duration, ev.OutputElapsed, ev.Usage, finishedAt)
 		if sessionLabel != "" {
 			if footer != "" {
 				footer += "\n    [" + sessionLabel + "]"
@@ -660,7 +652,7 @@ func buildToolLine(bullet, source, name, args string, width int) string {
 	header := style.Render(line)
 
 	switch name {
-	case "edit_file", "edit_tool", "edit_skill":
+	case "write_file", "edit_tool", "edit_skill":
 		hunks := utils.FormatPatchDiff(args)
 		if len(hunks) == 0 {
 			return writeDiffLine(header, args, width)

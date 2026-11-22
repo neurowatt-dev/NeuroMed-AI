@@ -9,13 +9,14 @@ import (
 
 	go_bot_discord "github.com/pardnchiu/go-bot/core/discord"
 
+	"github.com/pardnchiu/agenvoy/internal/agents/audio"
 	"github.com/pardnchiu/agenvoy/internal/agents/exec"
 	execchatbot "github.com/pardnchiu/agenvoy/internal/agents/exec/chatbot"
 	"github.com/pardnchiu/agenvoy/internal/filesystem"
+	"github.com/pardnchiu/agenvoy/internal/locale"
 	"github.com/pardnchiu/agenvoy/internal/runtime/chatbot"
 	sessiondiscord "github.com/pardnchiu/agenvoy/internal/session/discord"
 	sessionhistory "github.com/pardnchiu/agenvoy/internal/session/history"
-	audiotool "github.com/pardnchiu/agenvoy/internal/tools/external/audio"
 	"github.com/pardnchiu/agenvoy/internal/utils"
 	utilsmsg "github.com/pardnchiu/agenvoy/internal/utils/msg"
 )
@@ -62,6 +63,17 @@ func run(ctx context.Context, b *Bot, in go_bot_discord.Input) error {
 		if b.listener.OnCallback(ctx, in.ChannelID, in.MessageID, in.Text, in.CallbackPicks) {
 			return nil
 		}
+	}
+
+	if chatbot.ApplyMenu(menuKey(in.ChannelID, in.MessageID), in.Text, func(text string) func() {
+		msg, err := b.client.Send(ctx, in.ChannelID, in.MessageID, text)
+		return func() {
+			if err == nil && msg != nil {
+				_ = b.client.Delete(ctx, in.ChannelID, msg.ID)
+			}
+		}
+	}) {
+		return nil
 	}
 
 	content := strings.TrimSpace(in.Text)
@@ -137,7 +149,7 @@ func run(ctx context.Context, b *Bot, in go_bot_discord.Input) error {
 			slog.String("name", channelName(in)),
 			slog.String("code", code))
 		execchatbot.NotifyAdmin(ctx, code, "Discord "+channelName(in))
-		prompt, err := b.client.SendInput(ctx, in.ChannelID, "", "Enter the 6-digit verification code printed in the daemon log.")
+		prompt, err := b.client.SendInput(ctx, in.ChannelID, "", locale.GetChatbotCode().VerifyPrompt)
 		if err != nil {
 			slog.Warn("go_bot_discord.Bot.client.SendInput",
 				slog.String("channel", channelName(in)),
@@ -153,8 +165,8 @@ func run(ctx context.Context, b *Bot, in go_bot_discord.Input) error {
 	}
 
 	if hasAttachment {
-		if hasVoiceAttachment(in) && !audiotool.STTEnabled() {
-			_, _ = b.client.Send(ctx, in.ChannelID, in.MessageID, "No speech-to-text model selected · pick one with `/model stt` first.")
+		if hasVoiceAttachment(in) && audio.Model(audio.STT) == "" {
+			_, _ = b.client.Send(ctx, in.ChannelID, in.MessageID, fmt.Sprintf(locale.GetChatbotCode().STTMissing, "`/model stt`"))
 			return nil
 		}
 		attachments := saveAttachments(ctx, b, in)
@@ -184,12 +196,29 @@ func run(ctx context.Context, b *Bot, in go_bot_discord.Input) error {
 
 	content, isNew := chatbot.CutNewCommand(content)
 	if content == "" {
+		if isNew {
+			_, _ = b.client.Send(ctx, in.ChannelID, in.MessageID, chatbot.NewUsage)
+		}
 		return nil
 	}
 
 	discordSessionID, err := sessiondiscord.New(in.GuildID, in.ChannelID, in.UserID)
 	if err != nil {
 		return utilsmsg.Trace("session.GetDiscordSession", "", err)
+	}
+
+	if cmd, ok := chatbot.SessionCommand(discordSessionID, content); ok {
+		if cmd.Menu == "" {
+			_, _ = b.client.Send(ctx, in.ChannelID, in.MessageID, cmd.Text)
+			return nil
+		}
+		msg, err := b.client.SendSelect(ctx, in.ChannelID, in.MessageID, cmd.Text, cmd.Items)
+		if err != nil || msg == nil {
+			_, _ = b.client.Send(ctx, in.ChannelID, in.MessageID, chatbot.MenuFallback(cmd))
+			return nil
+		}
+		chatbot.RegisterMenu(menuKey(in.ChannelID, msg.ID), discordSessionID, cmd)
+		return nil
 	}
 
 	if !isNew && exec.IsRunning(discordSessionID) {
@@ -208,4 +237,8 @@ func run(ctx context.Context, b *Bot, in go_bot_discord.Input) error {
 		Sender:         in.Username,
 		SessionID:      discordSessionID,
 	})
+}
+
+func menuKey(channelID, messageID string) string {
+	return "dc:" + channelID + ":" + messageID
 }

@@ -12,6 +12,7 @@ import (
 	"github.com/line/line-bot-sdk-go/v8/linebot"
 	go_bot_line "github.com/pardnchiu/go-bot/core/line"
 
+	"github.com/pardnchiu/agenvoy/internal/agents/audio"
 	"github.com/pardnchiu/agenvoy/internal/agents/exec"
 	execchatbot "github.com/pardnchiu/agenvoy/internal/agents/exec/chatbot"
 	agentTypes "github.com/pardnchiu/agenvoy/internal/agents/types"
@@ -20,7 +21,6 @@ import (
 	sessionManager "github.com/pardnchiu/agenvoy/internal/session"
 	sessionHistory "github.com/pardnchiu/agenvoy/internal/session/history"
 	"github.com/pardnchiu/agenvoy/internal/tools"
-	audioTool "github.com/pardnchiu/agenvoy/internal/tools/external/audio"
 	"github.com/pardnchiu/agenvoy/internal/utils"
 )
 
@@ -173,7 +173,7 @@ func run(ctx context.Context, b *Bot, in go_bot_line.Input, attachInputs []go_bo
 	}
 
 	if hasAttachment {
-		if slices.ContainsFunc(attachInputs, inputHasVoice) && !audioTool.STTEnabled() {
+		if slices.ContainsFunc(attachInputs, inputHasVoice) && audio.Model(audio.STT) == "" {
 			if _, err := b.client.Send(ctx, target, "⚠️ no speech-to-text model selected · pick one with /model stt first."); err != nil {
 				slog.Warn("github.com/pardnchiu/go-bot/core/line Bot.Send (voice disabled)",
 					slog.String("source", target),
@@ -246,11 +246,6 @@ func run(ctx context.Context, b *Bot, in go_bot_line.Input, attachInputs []go_bo
 		return nil
 	}
 
-	content, isNew := chatbot.CutNewCommand(content)
-	if content == "" {
-		return nil
-	}
-
 	workDir, err := os.UserHomeDir()
 	if err != nil {
 		return fmt.Errorf("os.UserHomeDir: %w", err)
@@ -261,7 +256,7 @@ func run(ctx context.Context, b *Bot, in go_bot_line.Input, attachInputs []go_bo
 		return fmt.Errorf("github.com/pardnchiu/agenvoy/internal/session GetLineSession: %w", err)
 	}
 
-	if !isNew && exec.IsRunning(sessionID) {
+	if exec.IsRunning(sessionID) {
 		exec.AppendSteer(sessionID, "", content)
 		return nil
 	}

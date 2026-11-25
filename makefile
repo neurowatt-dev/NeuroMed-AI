@@ -1,6 +1,6 @@
 .PHONY: help build app dev stop update test
 
-VERSION := v1.3.23
+VERSION := v1.4.0
 
 help:
 	@echo "How to use:"
@@ -18,6 +18,7 @@ build:
 	@mkdir -p "$$HOME/.config/agenvoy/skills/.system" "$$HOME/.config/agenvoy/tools/.system"
 	@[ -d extensions/skills ] && cp -R extensions/skills/. "$$HOME/.config/agenvoy/skills/.system/" || true
 	@[ -d extensions/scripts ] && cp -R extensions/scripts/. "$$HOME/.config/agenvoy/tools/.system/" || true
+	@rm -rf "$$HOME/.config/agenvoy/hooks/demo" && mkdir -p "$$HOME/.config/agenvoy/hooks/demo" && cp -R configs/hooks/demo/. "$$HOME/.config/agenvoy/hooks/demo/"
 	@find "$$HOME/.config/agenvoy/skills/.system" "$$HOME/.config/agenvoy/tools/.system" -name __pycache__ -prune -exec rm -rf {} + 2>/dev/null || true
 
 app:

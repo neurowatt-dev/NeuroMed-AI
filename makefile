@@ -1,6 +1,6 @@
 .PHONY: help build app dev stop update test
 
-VERSION := v1.4.0
+VERSION := v1.4.1
 
 help:
 	@echo "How to use:"

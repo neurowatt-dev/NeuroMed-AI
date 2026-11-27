@@ -1,6 +1,6 @@
 .PHONY: help build app dev stop update test
 
-VERSION := v1.4.1
+VERSION := v1.5.0
 
 help:
 	@echo "How to use:"
@@ -14,12 +14,11 @@ help:
 build:
 	@git fetch --tags --force 2>/dev/null || true
 	@go build -tags "fts5" -ldflags "-X github.com/pardnchiu/agenvoy/internal/runtime.CurrentVersion=$(VERSION)" -o agen ./cmd/app/ && sudo mkdir -p /usr/local/bin && sudo mv agen /usr/local/bin/agen
-	@rm -rf "$$HOME/.config/agenvoy/skills/.system" "$$HOME/.config/agenvoy/tools/.system" "$$HOME/.config/agenvoy/vendor"
-	@mkdir -p "$$HOME/.config/agenvoy/skills/.system" "$$HOME/.config/agenvoy/tools/.system"
+	@rm -rf "$$HOME/.config/agenvoy/skills/.system" "$$HOME/.config/agenvoy/vendor"
+	@mkdir -p "$$HOME/.config/agenvoy/skills/.system"
 	@[ -d extensions/skills ] && cp -R extensions/skills/. "$$HOME/.config/agenvoy/skills/.system/" || true
-	@[ -d extensions/scripts ] && cp -R extensions/scripts/. "$$HOME/.config/agenvoy/tools/.system/" || true
 	@rm -rf "$$HOME/.config/agenvoy/hooks/demo" && mkdir -p "$$HOME/.config/agenvoy/hooks/demo" && cp -R configs/hooks/demo/. "$$HOME/.config/agenvoy/hooks/demo/"
-	@find "$$HOME/.config/agenvoy/skills/.system" "$$HOME/.config/agenvoy/tools/.system" -name __pycache__ -prune -exec rm -rf {} + 2>/dev/null || true
+	@find "$$HOME/.config/agenvoy/skills/.system" -name __pycache__ -prune -exec rm -rf {} + 2>/dev/null || true
 
 app:
 	@$(MAKE) stop
